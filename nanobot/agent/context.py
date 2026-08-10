@@ -232,14 +232,23 @@ class ContextBuilder:
         include_memory_recent_history: bool = True,
         session_key: str | None = None,
         unified_session: bool = False,
+        auto_bind_skill_names: Sequence[str] | None = None,
     ) -> list[dict[str, Any]]:
-        """Build the complete message list for an LLM call."""
+        """Build the complete message list for an LLM call.
+
+        ``auto_bind_skill_names`` (skill-guidance lane) is merged after the
+        explicit ``$skill`` references: explicit names keep priority, auto
+        bindings are appended to the tail without duplicates.
+        """
         root = workspace or self.workspace
         active_skill_names = (
             self.skills.get_explicitly_invoked_skills(current_message)
             if current_role == "user"
             else []
         )
+        for name in auto_bind_skill_names or ():
+            if name not in active_skill_names:
+                active_skill_names.append(name)
         messages: list[dict[str, Any]] = [
             {
                 "role": "system",

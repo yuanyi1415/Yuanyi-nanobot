@@ -1,11 +1,13 @@
 """Skills loader for agent capabilities."""
 
+import hashlib
 import json
 import os
 import re
 import shutil
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Sequence, cast
 
 import yaml
 
@@ -18,6 +20,98 @@ _STRIP_SKILL_FRONTMATTER = re.compile(
     re.DOTALL,
 )
 _SKILL_REFERENCE = re.compile(r"(?<![\w$])\$([A-Za-z0-9_-]+)")
+
+# Activation values understood by SkillDescriptor.
+_SKILL_ACTIVATIONS = ("auto", "manual", "always", "disabled")
+
+# Deterministic term matching for local skill recall (FR-3).
+_WORD_TOKEN_RE = re.compile(r"[a-z0-9]+")
+_CJK_TOKEN_RE = re.compile(r"[\u4e00-\u9fff]+")
+
+
+def _normalize_str_list(value: object) -> tuple[str, ...]:
+    """Coerce frontmatter tags/triggers (str, list, JSON str) to a tuple of strings."""
+    if isinstance(value, str):
+        raw = value.strip()
+        if not raw:
+            return ()
+        if raw.startswith("["):
+            try:
+                parsed = json.loads(raw)
+            except (json.JSONDecodeError, TypeError):
+                return (raw,)
+            return tuple(str(item).strip() for item in parsed if str(item).strip())
+        return (raw,)
+    if isinstance(value, list):
+        return tuple(str(item).strip() for item in value if str(item).strip())
+    return ()
+
+
+def _tokenize(text: str) -> set[str]:
+    """Split text into deterministic match terms (latin words + CJK bigrams)."""
+    if not text:
+        return set()
+    lowered = text.lower()
+    tokens = _WORD_TOKEN_RE.findall(lowered)
+    for chunk in _CJK_TOKEN_RE.findall(lowered):
+        if len(chunk) >= 2:
+            tokens.append(chunk)
+            tokens.extend(chunk[i : i + 2] for i in range(len(chunk) - 1))
+    return {token for token in tokens if token}
+
+
+def _estimate_tokens(text: str) -> int:
+    """Rough token count: tiktoken when available, else a UTF-8 byte budget."""
+    if not text:
+        return 0
+    try:
+        import tiktoken
+
+        return len(tiktoken.get_encoding("cl100k_base").encode(text))
+    except Exception:
+        return max(1, len(text.encode("utf-8")) // 4)
+
+
+@dataclass(frozen=True)
+class SkillDescriptor:
+    """Read-only matching metadata for one skill (FR-2).
+
+    Attributes:
+        name: Skill directory name.
+        source: "workspace" or "builtin".
+        description: One-line description (falls back to the skill name).
+        availability: Whether requirements (bins/env) are met.
+        activation: "auto" | "manual" | "always" | "disabled".
+        tags: Optional frontmatter tags that improve recall.
+        triggers: Optional frontmatter triggers that improve recall.
+        content_fingerprint: Short hash of the SKILL.md body.
+        missing_requirements: Human-readable unmet requirements, when any.
+    """
+
+    name: str
+    source: str
+    description: str
+    availability: bool
+    activation: str = "auto"
+    missing_requirements: str = ""
+    tags: tuple[str, ...] = ()
+    triggers: tuple[str, ...] = ()
+    content_fingerprint: str = ""
+
+
+@dataclass(frozen=True)
+class SkillRecallResult:
+    """Outcome of deterministic local skill recall (FR-3).
+
+    Attributes:
+        candidates: Matching candidate names, best score first.
+        bound: Names actually bound (subject to budget); subset of candidates.
+        reason: "none" | "high_confidence" | "ambiguous_multi_candidate" | "budget_limited".
+    """
+
+    candidates: tuple[str, ...] = ()
+    bound: tuple[str, ...] = ()
+    reason: str = "none"
 
 
 class SkillsLoader:
@@ -296,3 +390,159 @@ class SkillsLoader:
         for key, value in cast(dict[object, object], parsed).items():
             metadata[str(key)] = value
         return metadata
+
+    # ------------------------------------------------------------------
+    # SkillDescriptor + deterministic local recall (FR-2 / FR-3)
+    # ------------------------------------------------------------------
+
+    def list_skill_descriptors(self) -> list[SkillDescriptor]:
+        """Build read-only :class:`SkillDescriptor` views for all skills.
+
+        Legacy skills without the new frontmatter fields default to
+        ``activation=auto``; ``disabled``/``manual``/``always`` semantics are
+        preserved. Skills listed in ``disabled_skills`` are not included.
+        """
+        descriptors: list[SkillDescriptor] = []
+        for entry in self.list_skills(filter_unavailable=False):
+            name = entry["name"]
+            meta = self.get_skill_metadata(name) or {}
+            nanobot_meta = self._parse_nanobot_metadata(meta.get("metadata"))
+            description = self.get_skill_description(name)
+            # get_skill_description reads the top-level frontmatter; fall back
+            # to the nanobot metadata description when the top level lacks one.
+            if description == name:
+                meta_desc = nanobot_meta.get("description")
+                if isinstance(meta_desc, str) and meta_desc:
+                    description = meta_desc
+            available = self._check_requirements(nanobot_meta)
+            missing = "" if available else self._get_missing_requirements(nanobot_meta)
+            tags = _normalize_str_list(
+                nanobot_meta.get("tags", meta.get("tags"))
+            )
+            triggers = _normalize_str_list(
+                nanobot_meta.get("triggers", meta.get("triggers"))
+            )
+            descriptors.append(
+                SkillDescriptor(
+                    name=name,
+                    source=entry["source"],
+                    description=description,
+                    availability=available,
+                    activation=self._resolve_activation(nanobot_meta, meta),
+                    missing_requirements=missing,
+                    tags=tags,
+                    triggers=triggers,
+                    content_fingerprint=self._content_fingerprint(name),
+                )
+            )
+        return descriptors
+
+    @staticmethod
+    def _resolve_activation(nanobot_meta: dict[str, Any], front_meta: dict[str, Any]) -> str:
+        """Resolve activation from frontmatter, falling back to legacy booleans.
+
+        Priority: explicit ``activation`` string (nanobot metadata, then
+        top-level) -> ``always``/``manual``/``disabled`` booleans -> ``auto``.
+        """
+        for source in (nanobot_meta, front_meta):
+            value = source.get("activation")
+            if isinstance(value, str) and value.strip().lower() in _SKILL_ACTIVATIONS:
+                return value.strip().lower()
+        for source in (nanobot_meta, front_meta):
+            if source.get("always") is True:
+                return "always"
+            if source.get("manual") is True:
+                return "manual"
+            if source.get("disabled") is True:
+                return "disabled"
+        return "auto"
+
+    def _content_fingerprint(self, name: str) -> str:
+        """Short stable hash of the SKILL.md body for change detection."""
+        content = self.load_skill(name) or ""
+        return hashlib.sha256(content.encode("utf-8")).hexdigest()[:16]
+
+    def recall_skill_candidates(
+        self,
+        text: str,
+        *,
+        exclude: Sequence[str] = (),
+        max_count: int = 2,
+        token_budget: int = 2000,
+    ) -> SkillRecallResult:
+        """Deterministic local skill recall for the skill-guidance lane (FR-3).
+
+        Term-overlap matching against each candidate skill's name, description,
+        tags and triggers. Skills that are unavailable, ``disabled``,
+        ``manual`` or ``always`` are excluded, as are names in *exclude*
+        (explicit ``$skill`` references). A single high-confidence candidate is
+        bound subject to *max_count* and *token_budget*; ambiguous
+        multi-candidate matches are recorded but never bound (V1 has no LLM
+        selector).
+        """
+        if not text:
+            return SkillRecallResult()
+        query_tokens = _tokenize(text)
+        if not query_tokens:
+            return SkillRecallResult()
+        excluded = set(exclude or ())
+        scored: list[tuple[int, bool, str]] = []
+        for descriptor in self.list_skill_descriptors():
+            if descriptor.activation != "auto" or not descriptor.availability:
+                continue
+            if descriptor.name in excluded:
+                continue
+            score = self._match_score(query_tokens, descriptor)
+            if score > 0:
+                name_hit = bool(_tokenize(descriptor.name) & query_tokens)
+                scored.append((score, name_hit, descriptor.name))
+        if not scored:
+            return SkillRecallResult()
+        scored.sort(key=lambda item: (-item[0], item[2]))
+        candidates = tuple(name for _, _, name in scored)
+        top, second = scored[0], scored[1] if len(scored) > 1 else None
+        if second is not None:
+            # Ambiguous unless the winner is decisive, or the winner has an
+            # exact name hit that the runner-up lacks (name hits are a strong
+            # signal and should not be vetoed by incidental description terms).
+            top_hit, second_hit = top[1], second[1]
+            if top[0] < second[0] * 2 and not (top_hit and not second_hit):
+                return SkillRecallResult(candidates=candidates, reason="ambiguous_multi_candidate")
+        bound = self._bind_with_budget(scored, max_count=max_count, token_budget=token_budget)
+        if not bound:
+            return SkillRecallResult(candidates=candidates, reason="budget_limited")
+        return SkillRecallResult(candidates=candidates, bound=bound, reason="high_confidence")
+
+    @staticmethod
+    def _match_score(query_tokens: set[str], descriptor: SkillDescriptor) -> int:
+        """Heuristic term-overlap score: name > tags/triggers > description."""
+        score = 0
+        name_tokens = _tokenize(descriptor.name)
+        if name_tokens & query_tokens:
+            score += 5
+        tag_tokens = _tokenize(" ".join((*descriptor.tags, *descriptor.triggers)))
+        score += 2 * len(tag_tokens & query_tokens)
+        desc_tokens = _tokenize(descriptor.description)
+        score += len(desc_tokens & query_tokens)
+        return score
+
+    def _bind_with_budget(
+        self,
+        scored: list[tuple[int, bool, str]],
+        *,
+        max_count: int,
+        token_budget: int,
+    ) -> tuple[str, ...]:
+        """Greedily bind top candidates until count/token budgets are exhausted."""
+        bound: list[str] = []
+        total_tokens = 0
+        for _, _, name in scored:
+            if len(bound) >= max_count:
+                break
+            content = self.load_skill(name) or ""
+            tokens = _estimate_tokens(content)
+            if token_budget > 0 and total_tokens + tokens > token_budget:
+                break
+            bound.append(name)
+            total_tokens += tokens
+        return tuple(bound)

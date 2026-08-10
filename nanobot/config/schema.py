@@ -114,6 +114,15 @@ class ModelPresetConfig(Base):
         )
 
 
+class ExperimentalConfig(Base):
+    """Experimental features (all off by default; zero behavior change when off)."""
+
+    observe_lane: bool = False  # 切片1：记录每条普通消息的车道判定与 skill 召回（只写日志）
+    skill_auto_bind: bool = False  # 切片2：skill 自动候选 + 高置信绑定 + 注入上下文
+    skill_auto_bind_max_count: int = Field(default=2, ge=1, le=10)  # 自动绑定 skill 数量上限
+    skill_auto_bind_token_budget: int = Field(default=2000, ge=0)  # 绑定 skill 正文合计 token 上限（0=不限）
+
+
 class AgentDefaults(Base):
     """Default agent configuration."""
 
@@ -166,6 +175,7 @@ class AgentDefaults(Base):
         serialization_alias="consolidationRatio",
     )  # Consolidation target ratio (0.5 = 50% of budget retained after compression)
     dream: DreamConfig = Field(default_factory=DreamConfig)
+    experimental: ExperimentalConfig = Field(default_factory=ExperimentalConfig)
 
     @model_validator(mode="before")
     @classmethod

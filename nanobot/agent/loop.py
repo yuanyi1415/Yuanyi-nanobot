@@ -116,6 +116,27 @@ class TurnKind(Enum):
 
 
 @dataclass
+class SkillLaneDecision:
+    """Outcome of the deterministic lane decision + skill recall (FR-1/FR-3).
+
+    Attributes:
+        lane: "fast" (no binding), "skill" (explicit and/or auto bound),
+            or "other" (system/internal turns).
+        explicit: ``$skill`` names referenced in the message text.
+        candidates: Auto-recall candidate names, best score first.
+        bound: Auto-bound names (after budgets and ``$skill`` precedence).
+        reason: Recall outcome: none / high_confidence /
+            ambiguous_multi_candidate / budget_limited.
+    """
+
+    lane: str = "fast"
+    explicit: tuple[str, ...] = ()
+    candidates: tuple[str, ...] = ()
+    bound: tuple[str, ...] = ()
+    reason: str = "none"
+
+
+@dataclass
 class TurnContext:
     msg: InboundMessage
     session_key: str
@@ -297,6 +318,11 @@ class AgentLoop:
         restart_mode: str = "auto",
         local_trigger_store: LocalTriggerStore | None = None,
         idle_compact_check_interval_seconds: int = 0,
+        *,
+        observe_lane: bool = False,
+        skill_auto_bind: bool = False,
+        skill_auto_bind_max_count: int = 2,
+        skill_auto_bind_token_budget: int = 2000,
     ):
         from nanobot.config.schema import ToolsConfig
 
@@ -459,6 +485,11 @@ class AgentLoop:
         )
         self._idle_compact_check_interval_s = idle_compact_check_interval_seconds
         self._next_idle_compact_check_at = time.monotonic()
+        # Experimental slices (off by default; zero behavior change when off).
+        self.observe_lane = observe_lane
+        self.skill_auto_bind = skill_auto_bind
+        self.skill_auto_bind_max_count = skill_auto_bind_max_count
+        self.skill_auto_bind_token_budget = skill_auto_bind_token_budget
         if model_preset:
             self.set_model_preset(model_preset, publish_update=False)
         self._register_default_tools(provider_snapshot_loader=provider_snapshot_loader)
@@ -522,6 +553,10 @@ class AgentLoop:
             restart_mode=config.gateway.restart_mode,
             provider_snapshot_loader=provider_snapshot_loader,
             preset_snapshot_loader=preset_snapshot_loader,
+            observe_lane=defaults.experimental.observe_lane,
+            skill_auto_bind=defaults.experimental.skill_auto_bind,
+            skill_auto_bind_max_count=defaults.experimental.skill_auto_bind_max_count,
+            skill_auto_bind_token_budget=defaults.experimental.skill_auto_bind_token_budget,
             **extra,
         )
 
@@ -730,6 +765,13 @@ class AgentLoop:
         """Build the initial message list for the LLM turn."""
         assert ctx.session is not None
         scope = self.workspace_scopes.for_message(ctx.msg, ctx.session.metadata)
+        auto_bind: list[str] = []
+        if self.observe_lane or self.skill_auto_bind:
+            decision = self._decide_skill_lane(ctx)
+            if self.observe_lane:
+                self._observe_lane(ctx, decision)
+            if self.skill_auto_bind:
+                auto_bind = list(decision.bound)
         return self.context.build_messages(
             history=ctx.history,
             current_message=ctx.msg.content,
@@ -742,6 +784,58 @@ class AgentLoop:
             include_memory_recent_history=not ctx.ephemeral,
             session_key=ctx.session.key,
             unified_session=self._unified_session,
+            auto_bind_skill_names=auto_bind,
+        )
+
+    def _decide_skill_lane(self, ctx: TurnContext) -> SkillLaneDecision:
+        """Deterministic lane decision + local skill recall for one turn.
+
+        Explicit ``$skill`` references always win; auto recall excludes them
+        and appends only high-confidence bindings (FR-3/FR-4).
+        """
+        if ctx.kind is not TurnKind.USER:
+            return SkillLaneDecision(lane="other")
+        text = ctx.msg.content if isinstance(ctx.msg.content, str) else ""
+        explicit = tuple(self.context.skills.get_explicitly_invoked_skills(text))
+        recall = self.context.skills.recall_skill_candidates(
+            text,
+            exclude=explicit,
+            max_count=self.skill_auto_bind_max_count,
+            token_budget=self.skill_auto_bind_token_budget,
+        )
+        lane = "skill" if (explicit or recall.bound) else "fast"
+        return SkillLaneDecision(
+            lane=lane,
+            explicit=explicit,
+            candidates=recall.candidates,
+            bound=recall.bound,
+            reason=recall.reason,
+        )
+
+    def _observe_lane(self, ctx: TurnContext, decision: SkillLaneDecision) -> None:
+        """Write the FR-1 observability log line (loguru, channel=observability).
+
+        Records the lane decision and skill recall for one ordinary message
+        before prompt build; never touches session history. The message preview
+        honors the session's ``log_content`` policy (hidden as ``[content hidden]``
+        when the session opts out of content logging).
+        """
+        text = ctx.msg.content if isinstance(ctx.msg.content, str) else ""
+        if ctx.session is not None and not getattr(ctx.session.policy, "log_content", True):
+            preview = "[content hidden]"
+        else:
+            preview = text[:200]
+        logger.bind(channel="observability").info(
+            "skill_lane lane={} turn={} session={} kind={} explicit={} candidates={} bound={} reason={} preview={}",
+            decision.lane,
+            ctx.turn_id,
+            ctx.session_key,
+            ctx.kind.name,
+            ",".join(decision.explicit),
+            ",".join(decision.candidates),
+            ",".join(decision.bound),
+            decision.reason,
+            preview,
         )
 
     def _request_context_for_turn(self, ctx: TurnContext) -> RequestContext:
