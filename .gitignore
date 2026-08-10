@@ -103,7 +103,7 @@ bridge/node_modules/
 webui/.verify-*
 
 # Local dev process notes (never committed)
-Yuanyi_notes/
+Yuanyi-研发/
 
 # Local memory, runtime artifacts and throwaway tests (never committed)
 .learnings/
