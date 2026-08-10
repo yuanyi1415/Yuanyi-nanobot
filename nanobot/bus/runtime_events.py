@@ -76,6 +76,16 @@ class GoalStateChanged:
 
 
 @dataclass(frozen=True)
+class SubagentStatusChanged:
+    """A background subagent changed lifecycle state (started/completed/failed)."""
+
+    context: RuntimeEventContext
+    subagent_id: str
+    label: str
+    status: str
+
+
+@dataclass(frozen=True)
 class RuntimeModelChanged:
     """The active runtime model/preset changed."""
 
@@ -89,6 +99,7 @@ RuntimeEvent = (
     | TurnRunStatusChanged
     | TurnCompleted
     | GoalStateChanged
+    | SubagentStatusChanged
     | RuntimeModelChanged
 )
 RuntimeEventType = (
@@ -97,6 +108,7 @@ RuntimeEventType = (
     | type[TurnRunStatusChanged]
     | type[TurnCompleted]
     | type[GoalStateChanged]
+    | type[SubagentStatusChanged]
     | type[RuntimeModelChanged]
 )
 RuntimeEventHandler = Callable[[Any], Awaitable[None] | None]

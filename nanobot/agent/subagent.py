@@ -27,6 +27,11 @@ from nanobot.agent.tools.loader import ToolLoader
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
+from nanobot.bus.runtime_events import (
+    RuntimeEventBus,
+    RuntimeEventContext,
+    SubagentStatusChanged,
+)
 from nanobot.config.schema import AgentDefaults, ToolsConfig
 from nanobot.providers.base import LLMProvider
 from nanobot.security.workspace_access import (
@@ -35,6 +40,7 @@ from nanobot.security.workspace_access import (
     reset_workspace_scope,
     workspace_sandbox_status,
 )
+from nanobot.utils.helpers import maybe_persist_tool_result
 from nanobot.utils.llm_runtime import LLMRuntime
 from nanobot.utils.prompt_templates import render_template
 
@@ -104,6 +110,8 @@ class SubagentManager:
         max_concurrent_subagents: int | None = None,
         fail_on_tool_error: bool | None = None,
         llm_wall_timeout_for_session: Callable[[str | None], float | None] | None = None,
+        max_subagent_result_chars: int | None = None,
+        runtime_events: RuntimeEventBus | None = None,
     ):
         if workspace is None:
             raise TypeError("SubagentManager.__init__() missing required argument: 'workspace'")
@@ -146,6 +154,12 @@ class SubagentManager:
             if max_concurrent_subagents is not None
             else defaults.max_concurrent_subagents
         )
+        self.max_subagent_result_chars = (
+            max_subagent_result_chars
+            if max_subagent_result_chars is not None
+            else defaults.max_subagent_result_chars
+        )
+        self.runtime_events = runtime_events
         self.fail_on_tool_error = (
             fail_on_tool_error
             if fail_on_tool_error is not None
@@ -228,6 +242,33 @@ class SubagentManager:
         ToolLoader().load(ctx, registry, scope="subagent")
         return registry
 
+    def _publish_status_event(
+        self,
+        origin: _SubagentOrigin,
+        subagent_id: str,
+        label: str,
+        status: str,
+    ) -> None:
+        """Publish a subagent lifecycle event for WebUI subscribers (best-effort)."""
+        bus = self.runtime_events
+        if bus is None:
+            return
+        channel = origin.get("channel") or "cli"
+        chat_id = origin.get("chat_id") or "direct"
+        session_key = origin.get("session_key") or f"{channel}:{chat_id}"
+        bus.publish_nowait(
+            SubagentStatusChanged(
+                context=RuntimeEventContext(
+                    channel=channel,
+                    chat_id=chat_id,
+                    session_key=session_key,
+                ),
+                subagent_id=subagent_id,
+                label=label,
+                status=status,
+            )
+        )
+
     async def spawn(
         self,
         task: str,
@@ -277,6 +318,7 @@ class SubagentManager:
         self._running_tasks[task_id] = bg_task
         if session_key:
             self._session_tasks.setdefault(session_key, set()).add(task_id)
+        self._publish_status_event(origin, task_id, display_label, "started")
 
         def _cleanup(_: asyncio.Task[str]) -> None:
             self._running_tasks.pop(task_id, None)
@@ -429,13 +471,16 @@ class SubagentManager:
                 status.tool_events = list(result.tool_events)
                 final_result = self._format_partial_progress(result)
                 final_status = "error"
+                self._publish_status_event(origin, task_id, label, "failed")
             elif result.stop_reason == "error":
                 final_result = result.error or "Error: subagent execution failed."
                 final_status = "error"
+                self._publish_status_event(origin, task_id, label, "failed")
             else:
                 final_result = result.final_content or "Task completed but no final response was generated."
                 final_status = "ok"
                 logger.info("Subagent [{}] completed successfully", task_id)
+                self._publish_status_event(origin, task_id, label, "completed")
             if announce:
                 await self._announce_result(
                     task_id,
@@ -453,6 +498,7 @@ class SubagentManager:
             status.error = str(e)
             logger.exception("Subagent [{}] failed", task_id)
             final_result = f"Error: {e}"
+            self._publish_status_event(origin, task_id, label, "failed")
             if announce:
                 await self._announce_result(
                     task_id,
@@ -477,6 +523,23 @@ class SubagentManager:
     ) -> None:
         """Announce the subagent result to the main agent via the message bus."""
         status_text = "completed successfully" if status == "ok" else "failed"
+
+        # Budget the result before it enters the main agent's context: persist
+        # oversized summaries to disk and replace them with a stable reference
+        # (mirrors Hermes _apply_summary_budget — many full subagent summaries
+        # used to blow up the parent context window).
+        try:
+            result = maybe_persist_tool_result(
+                self.workspace,
+                origin.get("session_key"),
+                f"subagent-{task_id}",
+                result,
+                max_chars=self.max_subagent_result_chars,
+            )
+        except Exception:
+            logger.exception(
+                "Subagent [{}] result persist failed; using raw result", task_id
+            )
 
         announce_content = render_template(
             "agent/subagent_announce.md",

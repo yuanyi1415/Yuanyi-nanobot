@@ -1281,7 +1281,10 @@
         "defaultShort": "Padrão",
         "full": "Acesso total",
         "fullShort": "Total"
-      }
+      },
+      "subagentRunning": "Running",
+      "subagentDone": "Done",
+      "subagentFailed": "Failed"
     },
     "scrollToBottom": "Rolar para o final",
     "loadEarlier": "Carregar mensagens anteriores",

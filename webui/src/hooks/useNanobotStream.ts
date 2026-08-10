@@ -35,11 +35,16 @@ import type {
   OutboundMedia,
   SessionMention,
   GoalStateWsPayload,
+  SubagentStatusItem,
   MessageDeliveryStatus,
   UIMediaAttachment,
   UIMessage,
   WorkspaceScopePayload,
 } from "@/lib/types";
+
+/** Stable empty array for chats without any subagent snapshots, so resetting
+ * the state never allocates a new reference (avoids needless re-renders). */
+const NO_SUBAGENTS: SubagentStatusItem[] = [];
 
 interface StreamBuffer {
   /** ID of the assistant message currently receiving deltas (cleared when its segment closes). */
@@ -232,6 +237,8 @@ export function useNanobotStream(
   runStartedAt: number | null;
   /** Latest sustained goal for this ``chatId`` (``goal_state`` WS events). */
   goalState: GoalStateWsPayload | undefined;
+  /** Lifecycle status of background subagents for this chat (``subagent_status`` events). */
+  subagents: SubagentStatusItem[];
   send: (
     content: string,
     images?: SendAttachment[],
@@ -261,6 +268,7 @@ export function useNanobotStream(
   /** Unix epoch seconds when the current user turn started; cleared on ``idle``. */
   const [runStartedAt, setRunStartedAt] = useState<number | null>(initialRunStartedAt);
   const [goalState, setGoalState] = useState<GoalStateWsPayload | undefined>(undefined);
+  const [subagents, setSubagents] = useState<SubagentStatusItem[]>(NO_SUBAGENTS);
   const [streamError, setStreamError] = useState<StreamError | null>(null);
   const buffer = useRef<StreamBuffer | null>(null);
   const activeAssistantRef = useRef<ActiveAssistantCursor | null>(null);
@@ -660,6 +668,10 @@ export function useNanobotStream(
     setStreamError(null);
     setRunStartedAt(restoredRunStartedAt);
     setGoalState(chatId ? client.getGoalState(chatId) : undefined);
+    setSubagents((prev) => {
+      const next = chatId ? client.getSubagents(chatId) ?? NO_SUBAGENTS : NO_SUBAGENTS;
+      return prev === next ? prev : next;
+    });
     buffer.current = null;
     activeAssistantRef.current = null;
     closedAssistantStreamIdsRef.current.clear();
@@ -788,6 +800,24 @@ export function useNanobotStream(
         return;
       }
 
+      if (ev.event === "subagent_status") {
+        if (ev.chat_id && ev.chat_id !== chatId) return;
+        const item: SubagentStatusItem = {
+          subagent_id: ev.subagent_id,
+          label: ev.label,
+          status: ev.status,
+        };
+        setSubagents((prev) => {
+          const idx = prev.findIndex((s) => s.subagent_id === ev.subagent_id);
+          const next = idx === -1
+            ? [...prev, item]
+            : prev.map((s, i) => (i === idx ? item : s));
+          if (chatId) client.setSubagents(chatId, next);
+          return next;
+        });
+        return;
+      }
+
       if (ev.event === "goal_status") {
         if (ev.status === "running" && typeof ev.started_at === "number") {
           setRunStartedAt(ev.started_at);
@@ -804,6 +834,13 @@ export function useNanobotStream(
           setGoalState(ev.goal_state);
         }
         setRunStartedAt(null);
+        // A completed turn means finished subagents no longer need their
+        // status pills; keep only still-running ones (they may span turns).
+        setSubagents((prev) => {
+          const next = prev.filter((s) => s.status === "started");
+          if (chatId) client.setSubagents(chatId, next);
+          return next;
+        });
         // Definitive signal that the turn is fully complete.  Cancel any
         // pending debounce timer and stop the loading indicator immediately.
         cancelStreamEndTimer();
@@ -1168,6 +1205,7 @@ export function useNanobotStream(
     isStreaming,
     runStartedAt,
     goalState,
+    subagents,
     send,
     transcribeAudio,
     stop,

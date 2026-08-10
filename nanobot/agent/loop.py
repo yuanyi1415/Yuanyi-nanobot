@@ -265,6 +265,7 @@ class AgentLoop:
         context_window_tokens: int | None = None,
         context_block_limit: int | None = None,
         max_tool_result_chars: int | None = None,
+        max_subagent_result_chars: int | None = None,
         fail_on_tool_error: bool | None = None,
         provider_retry_mode: str = "standard",
         tool_hint_max_length: int | None = None,
@@ -350,6 +351,11 @@ class AgentLoop:
             if max_tool_result_chars is not None
             else defaults.max_tool_result_chars
         )
+        self.max_subagent_result_chars = (
+            max_subagent_result_chars
+            if max_subagent_result_chars is not None
+            else defaults.max_subagent_result_chars
+        )
         self.provider_retry_mode = provider_retry_mode
         self.tool_hint_max_length = (
             tool_hint_max_length if tool_hint_max_length is not None
@@ -396,6 +402,8 @@ class AgentLoop:
             max_concurrent_subagents=max_concurrent_subagents,
             fail_on_tool_error=fail_on_tool_error,
             llm_wall_timeout_for_session=lambda sk: runner_wall_llm_timeout_s(self.sessions, sk),
+            max_subagent_result_chars=self.max_subagent_result_chars,
+            runtime_events=self.runtime_events,
         )
         self._unified_session = unified_session
         self._running = False

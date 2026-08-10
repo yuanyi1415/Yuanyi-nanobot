@@ -8,6 +8,7 @@ import type {
   ConnectionStatus,
   GoalStateWsPayload,
   InboundEvent,
+  SubagentStatusItem,
   UIMessage,
 } from "@/lib/types";
 import { ClientProvider } from "@/providers/ClientProvider";
@@ -73,6 +74,7 @@ function fakeClient() {
   const runStartedAtByChatId = new Map<string, number>();
   const unsettledRunByChatId = new Map<string, boolean>();
   const goalStateByChatId = new Map<string, GoalStateWsPayload>();
+  const subagentsByChatId = new Map<string, SubagentStatusItem[]>();
   let status: ConnectionStatus = "open";
 
   function recordGoalStatusForRunStrip(chatId: string, ev: InboundEvent) {
@@ -119,6 +121,12 @@ function fakeClient() {
       },
       getGoalState(chatId: string) {
         return goalStateByChatId.get(chatId);
+      },
+      getSubagents(chatId: string) {
+        return subagentsByChatId.get(chatId);
+      },
+      setSubagents(chatId: string, items: SubagentStatusItem[]) {
+        subagentsByChatId.set(chatId, items);
       },
       hasUnsettledRun(chatId: string) {
         return unsettledRunByChatId.get(chatId) === true;
@@ -182,6 +190,132 @@ async function flushStreamFrame() {
 }
 
 describe("useNanobotStream", () => {
+  it("tracks subagent lifecycle status from subagent_status events", async () => {
+    const fake = fakeClient();
+    const { result } = renderHook(() => useNanobotStream("chat-sub", EMPTY_MESSAGES), {
+      wrapper: wrap(fake.client),
+    });
+
+    act(() => {
+      fake.emit("chat-sub", {
+        event: "subagent_status",
+        chat_id: "chat-sub",
+        subagent_id: "sa-1",
+        label: "研究竞品",
+        status: "started",
+      });
+    });
+    expect(result.current.subagents).toEqual([
+      { subagent_id: "sa-1", label: "研究竞品", status: "started" },
+    ]);
+
+    act(() => {
+      fake.emit("chat-sub", {
+        event: "subagent_status",
+        chat_id: "chat-sub",
+        subagent_id: "sa-2",
+        label: "写报告",
+        status: "started",
+      });
+      fake.emit("chat-sub", {
+        event: "subagent_status",
+        chat_id: "chat-sub",
+        subagent_id: "sa-1",
+        label: "研究竞品",
+        status: "completed",
+      });
+    });
+    expect(result.current.subagents).toHaveLength(2);
+    expect(result.current.subagents[0]).toEqual({
+      subagent_id: "sa-1",
+      label: "研究竞品",
+      status: "completed",
+    });
+    expect(result.current.subagents[1].status).toBe("started");
+  });
+
+  it("ignores subagent_status events from other chats (session isolation)", async () => {
+    const fake = fakeClient();
+    const { result } = renderHook(() => useNanobotStream("chat-a", EMPTY_MESSAGES), {
+      wrapper: wrap(fake.client),
+    });
+
+    act(() => {
+      fake.emit("chat-a", {
+        event: "subagent_status",
+        chat_id: "chat-b", // different chat -> must be ignored
+        subagent_id: "sa-other",
+        label: "别的会话",
+        status: "started",
+      });
+    });
+    expect(result.current.subagents).toEqual([]);
+  });
+
+  it("preserves per-chat subagent status when switching chats", async () => {
+    const fake = fakeClient();
+    const { result, rerender } = renderHook(
+      ({ chatId }) => useNanobotStream(chatId, EMPTY_MESSAGES),
+      {
+        wrapper: wrap(fake.client),
+        initialProps: { chatId: "chat-a" },
+      },
+    );
+
+    act(() => {
+      fake.emit("chat-a", {
+        event: "subagent_status",
+        chat_id: "chat-a",
+        subagent_id: "sa-1",
+        label: "研究竞品",
+        status: "started",
+      });
+    });
+    expect(result.current.subagents).toHaveLength(1);
+
+    // Switching to another chat must not leak chat-a's status in.
+    rerender({ chatId: "chat-b" });
+    expect(result.current.subagents).toEqual([]);
+
+    // Switching back restores chat-a's own status from the client store.
+    rerender({ chatId: "chat-a" });
+    expect(result.current.subagents).toEqual([
+      { subagent_id: "sa-1", label: "研究竞品", status: "started" },
+    ]);
+  });
+
+  it("drops completed/failed subagents on turn_end but keeps running ones", async () => {
+    const fake = fakeClient();
+    const { result } = renderHook(() => useNanobotStream("chat-c", EMPTY_MESSAGES), {
+      wrapper: wrap(fake.client),
+    });
+
+    act(() => {
+      fake.emit("chat-c", {
+        event: "subagent_status",
+        chat_id: "chat-c",
+        subagent_id: "sa-done",
+        label: "已完成任务",
+        status: "completed",
+      });
+      fake.emit("chat-c", {
+        event: "subagent_status",
+        chat_id: "chat-c",
+        subagent_id: "sa-run",
+        label: "后台任务",
+        status: "started",
+      });
+    });
+    expect(result.current.subagents).toHaveLength(2);
+
+    act(() => {
+      fake.emit("chat-c", { event: "turn_end", turn_id: "t1" });
+    });
+    expect(result.current.subagents).toEqual([
+      { subagent_id: "sa-run", label: "后台任务", status: "started" },
+    ]);
+  });
+
   it("batches answer deltas into one animation-frame update", async () => {
     const fake = fakeClient();
     const requestFrame = vi.spyOn(window, "requestAnimationFrame");

@@ -67,8 +67,14 @@ class SpawnTool(Tool):
         return (
             "Spawn a subagent to handle a task in the background. "
             "Use this for complex or time-consuming tasks that can run independently. "
-            "Set wait=true for a consultation whose result must inform the current turn. "
-            "The subagent will complete the task and report back when done. "
+            "Split parallelizable work into multiple spawn calls (at most 3 concurrent) "
+            "and consolidate the results yourself after they finish; "
+            "run dependent or sequential steps inline instead. "
+            "Set wait=true for a consultation whose result must inform the current turn "
+            "(the subagent result is returned directly); leave it false for background "
+            "execution (the result is announced in a later turn). "
+            "Include the goal, acceptance criteria, and a clear deliverable in the task "
+            "so the subagent does not guess scope. "
             "For deliverables or existing projects, inspect the workspace first "
             "and use a dedicated subdirectory when helpful."
         )

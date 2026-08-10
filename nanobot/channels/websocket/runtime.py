@@ -30,6 +30,7 @@ from nanobot.bus.outbound_events import (
     ProgressEvent,
     RuntimeModelUpdatedEvent,
     SessionUpdatedEvent,
+    SubagentStatusEvent,
     TurnEndEvent,
     TurnModelUpdatedEvent,
     outbound_event_from_message,
@@ -1383,11 +1384,21 @@ class WebSocketChannel(BaseChannel):
                 | TurnEndEvent
                 | SessionUpdatedEvent
                 | GoalStatusEvent
-                | GoalStateSyncEvent,
+                | GoalStateSyncEvent
+                | SubagentStatusEvent,
             ):
                 self.logger.debug("no active subscribers for chat_id={}", msg.chat_id)
             else:
                 self.logger.warning("no active subscribers for chat_id={}", msg.chat_id)
+        if isinstance(event, SubagentStatusEvent):
+            if conns:
+                await self.send_subagent_status(
+                    msg.chat_id,
+                    subagent_id=event.subagent_id,
+                    label=event.label,
+                    status=event.status,
+                )
+            return
         if isinstance(event, TurnModelUpdatedEvent):
             if conns:
                 await self.send_turn_model_updated(
@@ -1722,6 +1733,29 @@ class WebSocketChannel(BaseChannel):
         raw = json.dumps(body, ensure_ascii=False)
         for connection in conns:
             await self._safe_send_to(connection, raw, label=" goal_status ")
+
+    async def send_subagent_status(
+        self,
+        chat_id: str,
+        *,
+        subagent_id: str,
+        label: str,
+        status: str,
+    ) -> None:
+        """Notify subscribed clients that a subagent changed lifecycle state."""
+        conns = list(self._subs.get(chat_id, ()))
+        if not conns:
+            return
+        body: dict[str, Any] = {
+            "event": "subagent_status",
+            "chat_id": chat_id,
+            "subagent_id": subagent_id,
+            "label": label,
+            "status": status,
+        }
+        raw = json.dumps(body, ensure_ascii=False)
+        for connection in conns:
+            await self._safe_send_to(connection, raw, label=" subagent_status ")
 
     async def send_session_updated(self, chat_id: str, *, scope: str | None = None) -> None:
         """Notify WebUI clients that a session row should refresh."""

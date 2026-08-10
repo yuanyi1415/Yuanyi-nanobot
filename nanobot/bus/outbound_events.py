@@ -72,6 +72,15 @@ class GoalStateSyncEvent(OutboundEvent):
 
 
 @dataclass(frozen=True)
+class SubagentStatusEvent(OutboundEvent):
+    """Lifecycle status of a background subagent (started/completed/failed)."""
+
+    subagent_id: str
+    label: str
+    status: str
+
+
+@dataclass(frozen=True)
 class SessionUpdatedEvent(OutboundEvent):
     scope: str | None = None
 

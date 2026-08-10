@@ -8,6 +8,7 @@ import type {
   SessionMention,
   SidebarStatePayload,
   GoalStateWsPayload,
+  SubagentStatusItem,
   WorkspaceScopePayload,
 } from "./types";
 import { createHostWebSocket } from "./runtime";
@@ -210,6 +211,8 @@ export class NanobotClient {
   private static readonly COMPLETED_TURN_FENCE_MAX = 256;
   /** Latest ``goal_state`` snapshot per ``chat_id`` (multi-session isolation). */
   private goalStateByChatId = new Map<string, GoalStateWsPayload>();
+  /** Latest ``subagent_status`` items per ``chat_id`` (multi-session isolation). */
+  private subagentsByChatId = new Map<string, SubagentStatusItem[]>();
   private pendingNewChat: PendingChatRequest | null = null;
   private pendingTranscriptions = new Map<string, PendingRequest<string>>();
   private pendingSystemCommands = new Map<string, PendingRequest<void>>();
@@ -505,6 +508,16 @@ export class NanobotClient {
   /** Last ``goal_state`` payload for *chatId*, if any frame has arrived this connection. */
   getGoalState(chatId: string): GoalStateWsPayload | undefined {
     return this.goalStateByChatId.get(chatId);
+  }
+
+  /** Last ``subagent_status`` items for *chatId*, if any frame has arrived. */
+  getSubagents(chatId: string): SubagentStatusItem[] | undefined {
+    return this.subagentsByChatId.get(chatId);
+  }
+
+  /** Persist a subagent status snapshot for *chatId* (multi-session isolation). */
+  setSubagents(chatId: string, items: SubagentStatusItem[]): void {
+    this.subagentsByChatId.set(chatId, items);
   }
 
   private advanceRunGeneration(chatId: string, turnId?: string): void {

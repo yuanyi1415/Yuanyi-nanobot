@@ -239,6 +239,8 @@ vi.mock("@/lib/nanobot-client", async (importOriginal) => {
     getRunStartedAt = () => null;
     getGoalState = () => undefined;
     sendMessage = sendMessageSpy;
+    getSubagents = () => [];
+    setSubagents = () => {};
     newChat = vi.fn();
     newTemporaryChat = newTemporaryChatSpy;
     attach = attachSpy;

@@ -101,3 +101,11 @@ exp/
 .playwright-mcp/
 bridge/node_modules/
 webui/.verify-*
+
+# Local dev process notes (never committed)
+Yuanyi_notes/
+
+# Local memory, runtime artifacts and throwaway tests (never committed)
+.learnings/
+.nanobot/
+length_test/

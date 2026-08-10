@@ -250,6 +250,17 @@ const QUEUED_PROMPTS_LIMIT = 20;
 const QUEUED_PROMPT_MAX_CHARS = 4000;
 const SESSION_MENTIONS_LIMIT = 8;
 
+/** Per-chat composer draft (unsent text/attachments) kept in memory so a
+ * session switch does not destroy what the user was typing. Cleared on send. */
+interface ComposerDraft {
+  value: string;
+  mentions: SessionMention[];
+  images: RestoredReadyImage[];
+  quotedContext?: string | null;
+}
+
+const draftsByChatId = new Map<string, ComposerDraft>();
+
 function VoiceRecordingMeter({
   ariaLabel,
   className,
@@ -1008,6 +1019,14 @@ export function ThreadComposer({
   const wasStreamingRef = useRef(isStreaming);
   const skipNextQueuedFlushRef = useRef(false);
   const skipQueuedPromptPersistRef = useRef(false);
+  // Mirrors of the current draft fields, read by the chat-switch draft
+  // saver without subscribing the layout effect to every keystroke.
+  const valueRef = useRef(value);
+  valueRef.current = value;
+  const mentionsRef = useRef(selectedSessionMentions);
+  mentionsRef.current = selectedSessionMentions;
+  const quotedContextRef = useRef(quotedContext);
+  quotedContextRef.current = quotedContext;
   const voiceShortcutDownRef = useRef(false);
   const voiceErrorFadeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isHero = variant === "hero";
@@ -1047,6 +1066,8 @@ export function ThreadComposer({
   const maxTextBytes = ingressLimits?.message.max_text_bytes ?? 64 * 1024;
   const { images, enqueue, remove, clear, restoreReadyImages, encoding, full } =
     useAttachedImages({ ingressLimits });
+  const imagesRef = useRef(images);
+  imagesRef.current = images;
 
   const formatRejection = useCallback(
     (reason: AttachmentError): string => {
@@ -1533,24 +1554,56 @@ export function ThreadComposer({
   }, []);
 
   // Runs before paint so switching sessions never flashes stale draft text.
+  // Per-chat drafts are saved/restored here: typing survives session switches.
+  // Value/mentions/images are read via refs so this effect never re-runs on
+  // every keystroke — it fires only when the chat key actually changes.
   useLayoutEffect(() => {
     if (previousPendingQueueKeyRef.current === pendingQueueKey) return;
+    const previousKey = previousPendingQueueKeyRef.current;
+    const nextKey = pendingQueueKey;
     previousPendingQueueKeyRef.current = pendingQueueKey;
-    secondEnterPromptIdRef.current = null;
-    setValue("");
-    setSelectedSessionMentions([]);
+
+    // Save the outgoing chat's draft before clearing the input.
+    if (previousKey) {
+      const draft: ComposerDraft = {
+        value: valueRef.current,
+        mentions: mentionsRef.current,
+        images: imagesRef.current
+          .filter((img) => img.status === "ready" && img.dataUrl)
+          .map((img) => ({
+            dataUrl: img.dataUrl as string,
+            ...(img.kind ? { kind: img.kind as AttachmentKind } : {}),
+          })),
+        ...(quotedContextRef.current ? { quotedContext: quotedContextRef.current } : {}),
+      };
+      if (draft.value.trim() || draft.images.length || draft.mentions.length) {
+        draftsByChatId.set(previousKey, draft);
+      } else {
+        draftsByChatId.delete(previousKey);
+      }
+    }
+
+    // Restore the incoming chat's draft, if any.
+    const restored = nextKey ? draftsByChatId.get(nextKey) : undefined;
+    setValue(restored?.value ?? "");
+    setSelectedSessionMentions(restored?.mentions ?? []);
     setInlineError(null);
     setSlashMenuDismissed(false);
     setCliAppMenuDismissed(false);
-    setCursorPosition(0);
-    clear();
+    setCursorPosition(restored?.value.length ?? 0);
+    if (restored?.images?.length) {
+      restoreReadyImages(restored.images);
+    } else {
+      clear();
+    }
+    onQuotedContextChange?.(restored?.quotedContext ?? null);
     requestAnimationFrame(() => {
       const el = textareaRef.current;
       if (!el) return;
       el.style.height = "auto";
       el.style.height = `${Math.min(el.scrollHeight, 260)}px`;
     });
-  }, [clear, pendingQueueKey]);
+  }, [clear, onQuotedContextChange, pendingQueueKey, restoreReadyImages]);
 
   const appendTranscription = useCallback((text: string) => {
     const transcript = text.trim();
@@ -2018,6 +2071,7 @@ export function ThreadComposer({
       setQueuedPrompts([]);
       clear();
       clearComposerText();
+      if (pendingQueueKey) draftsByChatId.delete(pendingQueueKey);
       onQuotedContextChange?.(null);
       return;
     }
@@ -2031,6 +2085,7 @@ export function ThreadComposer({
       // preview here without affecting the rendered message.
       clear();
       clearComposerText(!hasTouchPrimaryPointer);
+      if (pendingQueueKey) draftsByChatId.delete(pendingQueueKey);
       onQuotedContextChange?.(null);
     };
     const result = onSend(

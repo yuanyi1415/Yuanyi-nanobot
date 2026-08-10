@@ -283,6 +283,13 @@ export interface GoalStateWsPayload {
   objective?: string;
 }
 
+/** Lifecycle status of a background subagent (``subagent_status`` WS events). */
+export interface SubagentStatusItem {
+  subagent_id: string;
+  label: string;
+  status: "started" | "completed" | "failed";
+}
+
 export interface ToolProgressEvent {
   version?: number;
   phase?: "start" | "end" | "error" | string;
@@ -1247,6 +1254,13 @@ export type InboundEvent =
       event: "goal_state";
       chat_id: string;
       goal_state: GoalStateWsPayload;
+    }
+  | {
+      event: "subagent_status";
+      chat_id: string;
+      subagent_id: string;
+      label: string;
+      status: "started" | "completed" | "failed";
     }
   | {
       event: "session_updated";

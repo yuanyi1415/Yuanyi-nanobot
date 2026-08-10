@@ -1,5 +1,6 @@
 """Tests for SubagentManager."""
 
+import asyncio
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
@@ -81,6 +82,39 @@ def test_subagent_respects_file_tool_toggle(tmp_path):
         "write_file",
     }
     assert file_tools.isdisjoint(tools.tool_names)
+
+
+@pytest.mark.asyncio
+async def test_publish_status_event_emits_runtime_event():
+    """Subagent lifecycle publishes runtime events for WebUI subscribers."""
+    from nanobot.bus.runtime_events import RuntimeEventBus, SubagentStatusChanged
+
+    bus = MessageBus()
+    rt = RuntimeEventBus()
+    received: list[SubagentStatusChanged] = []
+    rt.subscribe(received.append, SubagentStatusChanged)
+    sm = SubagentManager(
+        workspace=Path("/tmp"),
+        bus=bus,
+        max_tool_result_chars=16_000,
+        runtime_events=rt,
+    )
+
+    sm._publish_status_event(
+        {"channel": "websocket", "chat_id": "chat-1", "session_key": "websocket:chat-1"},
+        "sa-1",
+        "研究竞品",
+        "started",
+    )
+    await asyncio.sleep(0)  # publish_nowait schedules a task
+    await asyncio.sleep(0)
+
+    assert len(received) == 1
+    assert received[0].subagent_id == "sa-1"
+    assert received[0].label == "研究竞品"
+    assert received[0].status == "started"
+    assert received[0].context.channel == "websocket"
+    assert received[0].context.chat_id == "chat-1"
 
 
 def test_subagent_prompt_explains_grouped_skill_paths(tmp_path):
@@ -181,3 +215,54 @@ async def test_subagent_forwards_fail_on_tool_error_to_runner(tmp_path):
 
     spec = sm.runner.run.call_args.args[0]
     assert spec.fail_on_tool_error is False
+
+
+@pytest.mark.asyncio
+async def test_announce_persists_oversized_result(tmp_path):
+    """Oversized subagent results are persisted to disk and replaced with a reference."""
+    bus = MessageBus()
+    sm = SubagentManager(
+        workspace=tmp_path,
+        bus=bus,
+        max_tool_result_chars=16_000,
+        max_subagent_result_chars=1_000,
+    )
+
+    long_result = "x" * 5_000
+    await sm._announce_result(
+        "t1", "label", "task", long_result,
+        {"channel": "cli", "chat_id": "direct", "session_key": "s1"},
+        "ok",
+    )
+
+    msg = await bus.consume_inbound()
+    content = msg.content
+    assert "[tool output persisted]" in content
+    assert "Full output saved to:" in content
+    assert "Original size: 5000 chars" in content
+    # full text is on disk, not in the message
+    assert "x" * 5_000 not in content
+    assert (tmp_path / ".nanobot" / "tool-results").exists()
+
+
+@pytest.mark.asyncio
+async def test_announce_passes_short_result_through(tmp_path):
+    """Short results are announced verbatim (no persistence)."""
+    bus = MessageBus()
+    sm = SubagentManager(
+        workspace=tmp_path,
+        bus=bus,
+        max_tool_result_chars=16_000,
+        max_subagent_result_chars=1_000,
+    )
+
+    await sm._announce_result(
+        "t1", "label", "task", "short ok",
+        {"channel": "cli", "chat_id": "direct", "session_key": "s1"},
+        "ok",
+    )
+
+    msg = await bus.consume_inbound()
+    content = msg.content
+    assert "short ok" in content
+    assert "[tool output persisted]" not in content

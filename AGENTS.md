@@ -4,6 +4,24 @@ This file provides guidance to AI coding agents working with this repository.
 
 nanobot is a lightweight, open-source AI agent framework written in Python with a React/TypeScript WebUI. It centers around a small agent loop that receives messages from chat channels, invokes an LLM provider, executes tools, and manages session memory.
 
+## Collaboration Authority and Safe Development
+
+- The user assigns Codex responsibility for the full nanobot development lifecycle: discovery,
+  architecture, implementation, testing, review, and release preparation. The user's explicit
+  instruction for a task determines Codex's scope; do not redirect work to another coding agent
+  unless the user explicitly asks for that handoff.
+- This checkout is also the user's actively used nanobot instance. Treat it as production: never
+  use it as an experiment target, restart its gateway, modify its live configuration/state, or
+  overwrite its existing uncommitted changes without the user's explicit approval.
+- Perform implementation work in an isolated git worktree and dedicated branch. Before any merge
+  or release-facing action, run the agreed regression checks and obtain the user's approval.
+- Preserve a clear safety boundary between the running instance and development artifacts. Any
+  change that needs a gateway restart, config migration, dependency installation, or data mutation
+  requires explicit user confirmation after its impact is stated.
+- Before any GitHub publish action, treat a successful `gh auth status` as the authentication
+  source of truth. If it fails, do not create publish artifacts or modify a remote; ask the user
+  to re-authenticate and verify again.
+
 ## Development Commands
 
 ```bash

@@ -39,6 +39,8 @@ interface ThreadViewportProps {
   isStreaming: boolean;
   composer: ReactNode;
   emptyState?: ReactNode;
+  /** Rendered at the end of the message flow (above the composer). */
+  subagentStrip?: ReactNode;
   scrollToBottomSignal?: number;
   activeTurnId?: string | null;
   activeTurnStartedHere?: boolean;
@@ -162,6 +164,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
   isStreaming,
   composer,
   emptyState,
+  subagentStrip,
   scrollToBottomSignal = 0,
   activeTurnId = null,
   activeTurnStartedHere = false,
@@ -695,6 +698,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
                   onForkFromMessage={onForkFromMessage}
                   onQuoteSelection={onQuoteSelection}
                 />
+                {subagentStrip}
               </div>
               <div ref={bottomRef} aria-hidden className="h-px shrink-0" />
             </div>

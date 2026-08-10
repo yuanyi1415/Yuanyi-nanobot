@@ -710,6 +710,7 @@ export function ThreadShell({
     isStreaming,
     runStartedAt,
     goalState,
+    subagents,
     send,
     transcribeAudio,
     stop,
@@ -779,6 +780,45 @@ export function ThreadShell({
   const displayMessages = useMemo(() => projectWebuiThreadMessages(messages), [messages]);
   const currentRunStartedAt = messagesReady ? runStartedAt : null;
   const currentGoalState = messagesReady ? goalState : undefined;
+  const currentSubagents = messagesReady ? subagents : [];
+  const subagentStrip =
+    currentSubagents.length > 0 ? (
+      <div
+        data-testid="subagent-status-strip"
+        className="mx-auto mt-3 flex w-full max-w-[49.5rem] flex-wrap items-center gap-2 px-0"
+      >
+        {currentSubagents.map((s) => (
+          <span
+            key={s.subagent_id}
+            data-status={s.status}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-black/[0.06] bg-muted/40 px-2.5 py-1.5 text-[12px] font-medium text-foreground/80 dark:border-white/[0.08]"
+          >
+            <img
+              src="/brand/subagent-mark.svg"
+              alt=""
+              aria-hidden
+              className="h-3.5 w-3.5 shrink-0"
+            />
+            <span className="truncate">{s.label}</span>
+            <span
+              className={
+                s.status === "started"
+                  ? "text-sky-600 dark:text-sky-400"
+                  : s.status === "completed"
+                    ? "text-emerald-600 dark:text-emerald-400"
+                    : "text-red-600 dark:text-red-400"
+              }
+            >
+              {s.status === "started"
+                ? t("thread.composer.subagentRunning")
+                : s.status === "completed"
+                  ? t("thread.composer.subagentDone")
+                  : t("thread.composer.subagentFailed")}
+            </span>
+          </span>
+        ))}
+      </div>
+    ) : null;
   const turnActive = messagesReady && (isStreaming || currentRunStartedAt !== null);
   const restoredViewportTurnId = useMemo(
     () => turnActive ? latestActiveTurnId(displayMessages) : null,
@@ -1540,6 +1580,7 @@ export function ThreadShell({
             isStreaming={turnActive}
             emptyState={emptyState}
             composer={composer}
+            subagentStrip={subagentStrip}
             activeTurnId={viewportTurnId}
             activeTurnStartedHere={activeTurnStartedHere}
             conversationKey={historyKey}

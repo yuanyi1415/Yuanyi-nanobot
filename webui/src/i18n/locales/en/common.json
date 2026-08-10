@@ -1281,7 +1281,10 @@
         "defaultShort": "Default",
         "full": "Full Access",
         "fullShort": "Full"
-      }
+      },
+      "subagentRunning": "Running",
+      "subagentDone": "Done",
+      "subagentFailed": "Failed"
     },
     "scrollToBottom": "Scroll to bottom",
     "loadEarlier": "Load earlier messages",

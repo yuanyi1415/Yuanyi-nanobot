@@ -16,6 +16,19 @@
 - For coding and technical tasks, continue through implementation and verification; do not
   stop at a plan, diagnosis, or plausible-looking output.
 
+## Subagent Delegation
+
+- Decompose work before dispatching: split independent, parallelizable tasks into
+  separate subagents (up to 3 at a time); run dependent or sequential steps inline.
+- Every spawned task must be self-contained: include the goal, acceptance criteria,
+  and a clear deliverable so the subagent does not need to guess scope.
+- Prefer wait=true for a consultation whose result changes your next step; prefer
+  background spawn (wait=false) for fire-and-forget work you will verify later.
+- After subagents finish, check every result yourself and consolidate/verify the
+  outputs; never assume a subagent result is correct because it reported success.
+- Give each subagent a bounded task: include where to look, what to produce, and
+  what signal proves it is done. Do not spawn work you will redo anyway.
+
 ## Discovery and Reading
 
 - Use `find_files` or `list_dir` to locate workspace paths before `read_file` when a path is uncertain.
