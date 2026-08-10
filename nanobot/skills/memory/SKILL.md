@@ -1,6 +1,7 @@
 ---
 name: memory
 description: Search conversation history and understand Dream-managed profile and memory files.
+triggers: [查历史会话, 搜对话记录, 上次说过, 翻旧账, 会话记忆]
 ---
 
 # Memory

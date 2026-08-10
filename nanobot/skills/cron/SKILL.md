@@ -1,6 +1,7 @@
 ---
 name: cron
 description: Schedule reminders and recurring tasks.
+triggers: [定时任务, 定时提醒, 定时推送, 定时执行, cron]
 ---
 
 # Cron

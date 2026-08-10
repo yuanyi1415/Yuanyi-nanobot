@@ -3,6 +3,7 @@ name: weather
 description: Get current weather and forecasts (no API key required).
 homepage: https://wttr.in/:help
 metadata: {"nanobot":{"emoji":"🌤️","requires":{"bins":["curl"]}}}
+triggers: [查天气, 天气预报, 明天天气, 今天天气]
 ---
 
 # Weather

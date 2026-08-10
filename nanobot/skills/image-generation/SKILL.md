@@ -1,6 +1,7 @@
 ---
 name: image-generation
 description: Generate images and iteratively edit saved image artifacts.
+triggers: [生成图片, 画一张, AI绘图, 图片生成, 配图]
 ---
 
 # Image Generation
