@@ -1,0 +1,23 @@
+【任务派发：切片 1+2 零侵入观测 + Skill 引导车道】
+
+任务目标：在本仓库实现通用 Agent 改造的两个前置切片——①零侵入观测（记录车道判定与 skill 召回，只写日志不改行为）②Skill 引导车道（skill 自动候选 + 高置信绑定 + 注入上下文）。两个 feature flag 默认关闭，行为零影响。
+
+第一步：先读开发输入文档（必读，含代码现状、功能需求 FR-1~5、边界禁动清单、测试要求）：
+docs/研发/通用Agent改造/05_实施/切片1-2-skill引导/开发输入.md
+
+第二步：按 FR-1~5 实现。重点：
+- context.py 的 build_system_prompt 已接受 active_skill_names 参数（接口就绪），注入点在 loop.py _build_initial_messages 调用 build_messages 处
+- skills.py 增加 SkillDescriptor（activation 概念，旧 skill 默认 auto，disabled/manual/always 保留）
+- 召回用本地确定性词项匹配，不引入 LLM 调用（V1 无 SkillSelector）
+- 两个 flag：experimental.observe_lane / experimental.skill_auto_bind，默认 false，关闭时零新增行为
+
+第三步：写测试（激活默认/绑定注入/$skill 优先/预算截断/flag 关闭零变化），跑全量回归：
+PYTHONPATH=$PWD ~/Desktop/AI/13_nanobot/.venv/bin/python -m pytest tests/ -q
+（基线 4849 passed；9 个网络类失败是环境既有问题，不算回归，列出即可）
+
+纪律：只改本仓库代码，git 不提交（验收后统一提交）；不碰 provider/runner/subagent/权限/确认机制；不提交配置文件；文件边界=nanobot/agent/context.py、nanobot/agent/skills.py、nanobot/agent/loop.py、nanobot/config/schema.py、tests/ 新增测试、docs/研发/通用Agent改造/05_实施/切片1-2-skill引导/ 下可加说明；其余文件禁动。
+
+完成输出（汇报时给）：
+1. 改动文件清单（每文件改动说明）
+2. 新增测试用例列表 + 全量 pytest 结果数字
+3. 新增配置项清单（flag/预算名与默认值）
