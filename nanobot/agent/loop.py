@@ -789,8 +789,9 @@ class AgentLoop:
             unified_session=self._unified_session,
             auto_bind_skill_names=auto_bind,
         )
-        if self.observe_lane and decision is not None and (decision.explicit or decision.bound):
-            self._observe_skill_context_loaded(ctx, decision)
+        loaded_skill_names = tuple((*decision.explicit, *auto_bind)) if decision is not None else ()
+        if self.observe_lane and decision is not None and loaded_skill_names:
+            self._observe_skill_context_loaded(ctx, loaded_skill_names, auto_bound=auto_bind)
         return messages
 
     def _decide_skill_lane(self, ctx: TurnContext) -> SkillLaneDecision:
@@ -855,24 +856,29 @@ class AgentLoop:
             decision.reason,
         )
 
-    def _observe_skill_context_loaded(self, ctx: TurnContext, decision: SkillLaneDecision) -> None:
+    def _observe_skill_context_loaded(
+        self,
+        ctx: TurnContext,
+        skill_names: tuple[str, ...],
+        *,
+        auto_bound: list[str],
+    ) -> None:
         """Record the successful context-load stage after ContextBuilder returns."""
-        explicit = list(decision.explicit)
-        auto = [name for name in decision.bound if name not in explicit]
-        names = tuple((*explicit, *auto))
+        auto = tuple(auto_bound)
+        explicit = tuple(name for name in skill_names if name not in auto)
         source = "+".join(part for part, values in (("explicit", explicit), ("auto", auto)) if values)
         logger.bind(
             channel="observability",
             event="skill_context_loaded",
             turn=ctx.turn_id,
             session=ctx.session_key,
-            skills=names,
+            skills=skill_names,
             source=source,
         ).info(
             "skill_lane event=context_loaded turn={} session={} skills={} source={}",
             ctx.turn_id,
             ctx.session_key,
-            ",".join(names),
+            ",".join(skill_names),
             source,
         )
 

@@ -277,6 +277,22 @@ def test_observe_lane_records_context_loaded_after_auto_binding(tmp_path: Path) 
     assert any("skill_lane event=context_loaded" in line and "skills=github" in line for line in logs)
 
 
+def test_observe_only_does_not_claim_skill_context_loaded(tmp_path: Path) -> None:
+    """Shadow mode reports a theoretical binding but never a completed context load."""
+    (tmp_path / "skills").mkdir(parents=True)
+    _write_skill(tmp_path / "skills", "github", metadata_json={"description": "github prs"})
+    loop = _make_loop(tmp_path, observe_lane=True, skill_auto_bind=False)
+    logs: list[str] = []
+    sink_id = logger.add(logs.append, level="INFO", format="{message}")
+    try:
+        loop._build_initial_messages(_with_session(_user_turn(loop, "open a github pr")))
+    finally:
+        logger.remove(sink_id)
+
+    assert any("bound=github" in line for line in logs)
+    assert not any("skill_lane event=context_loaded" in line for line in logs)
+
+
 def test_flags_off_produce_no_observability_log(tmp_path: Path) -> None:
     (tmp_path / "skills").mkdir(parents=True)
     _write_skill(tmp_path / "skills", "github", metadata_json={"description": "github prs"})
