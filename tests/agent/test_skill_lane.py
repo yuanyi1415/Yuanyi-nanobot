@@ -198,6 +198,7 @@ def test_observe_lane_emits_structured_log(tmp_path: Path) -> None:
     assert "candidates=github" in line
     assert "bound=github" in line
     assert "bound_token_estimate=" in line
+    assert "recall_elapsed_ms=" in line
     assert "reason=high_confidence" in line
     assert "open a github pr" not in line
 
@@ -210,6 +211,7 @@ def test_observe_lane_fast_no_binding(tmp_path: Path) -> None:
     assert decision.candidates == ()
     assert decision.bound == ()
     assert decision.reason == "none"
+    assert decision.recall_elapsed_ms >= 0
 
 
 def test_observe_lane_system_turn_is_other(tmp_path: Path) -> None:

@@ -135,6 +135,7 @@ class SkillLaneDecision:
     bound: tuple[str, ...] = ()
     reason: str = "none"
     bound_token_estimate: int = 0
+    recall_elapsed_ms: float = 0.0
 
 
 @dataclass
@@ -802,12 +803,14 @@ class AgentLoop:
             return SkillLaneDecision(lane="other")
         text = ctx.msg.content if isinstance(ctx.msg.content, str) else ""
         explicit = tuple(self.context.skills.get_explicitly_invoked_skills(text))
+        recall_started = time.perf_counter()
         recall = self.context.skills.recall_skill_candidates(
             text,
             exclude=explicit,
             max_count=self.skill_auto_bind_max_count,
             token_budget=self.skill_auto_bind_token_budget,
         )
+        recall_elapsed_ms = (time.perf_counter() - recall_started) * 1000
         lane = "skill" if (explicit or recall.bound) else "fast"
         return SkillLaneDecision(
             lane=lane,
@@ -816,6 +819,7 @@ class AgentLoop:
             bound=recall.bound,
             reason=recall.reason,
             bound_token_estimate=recall.bound_token_estimate,
+            recall_elapsed_ms=recall_elapsed_ms,
         )
 
     def _observe_lane(self, ctx: TurnContext, decision: SkillLaneDecision) -> None:
@@ -835,9 +839,10 @@ class AgentLoop:
             candidates=decision.candidates,
             bound=decision.bound,
             bound_token_estimate=decision.bound_token_estimate,
+            recall_elapsed_ms=decision.recall_elapsed_ms,
             reason=decision.reason,
         ).info(
-            "skill_lane event=decision lane={} turn={} session={} kind={} explicit={} candidates={} bound={} bound_token_estimate={} reason={}",
+            "skill_lane event=decision lane={} turn={} session={} kind={} explicit={} candidates={} bound={} bound_token_estimate={} recall_elapsed_ms={:.3f} reason={}",
             decision.lane,
             ctx.turn_id,
             ctx.session_key,
@@ -846,6 +851,7 @@ class AgentLoop:
             ",".join(decision.candidates),
             ",".join(decision.bound),
             decision.bound_token_estimate,
+            decision.recall_elapsed_ms,
             decision.reason,
         )
 
