@@ -84,7 +84,7 @@ def test_non_auto_activations_excluded(loader: SkillsLoader, tmp_path: Path) -> 
     _write_skill(tmp_path / "ws" / "skills", "manual-skill", metadata_json={"manual": True, "description": "manual stuff"})
     _write_skill(tmp_path / "ws" / "skills", "always-skill", metadata_json={"always": True, "description": "always stuff"})
     _write_skill(tmp_path / "ws" / "skills", "disabled-skill", metadata_json={"disabled": True, "description": "disabled stuff"})
-    result = loader.recall_skill_candidates("auto manual always disabled stuff")
+    result = loader.recall_skill_candidates("run auto-skill now")
     assert result.bound == ("auto-skill",)
     assert result.candidates == ("auto-skill",)
 
@@ -169,8 +169,51 @@ def test_name_hit_not_vetoed_by_incidental_description_terms(
 
 
 def test_cjk_term_matching(loader: SkillsLoader, tmp_path: Path) -> None:
-    """CJK chunks participate in term matching."""
-    _write_skill(tmp_path / "ws" / "skills", "pdf", metadata_json={"description": "PDF 视觉设计 排版"})
+    """An exact CJK trigger is a strong automatic-binding signal."""
+    _write_skill(
+        tmp_path / "ws" / "skills",
+        "pdf",
+        metadata_json={"description": "PDF 视觉设计 排版", "triggers": ["视觉设计"]},
+    )
     result = loader.recall_skill_candidates("帮我做一个 视觉设计 的 PDF")
     assert result.bound == ("pdf",)
+    assert result.reason == "high_confidence"
+
+
+def test_description_only_match_is_observed_but_not_auto_bound(
+    loader: SkillsLoader, tmp_path: Path
+) -> None:
+    """Generic description words must never inject an unrelated workflow."""
+    _write_skill(
+        tmp_path / "ws" / "skills",
+        "image-ocr",
+        metadata_json={"description": "处理图片内容与文字" , "triggers": ["截图内容"]},
+    )
+    result = loader.recall_skill_candidates("里面的内容是按我说的来吗")
+    assert result.candidates == ("image-ocr",)
+    assert result.bound == ()
+    assert result.reason == "weak_match"
+
+
+def test_trigger_phrase_binds_the_intended_skill(loader: SkillsLoader, tmp_path: Path) -> None:
+    _write_skill(
+        tmp_path / "ws" / "skills",
+        "image-ocr",
+        metadata_json={"description": "处理图片内容与文字", "triggers": ["提取图片文字"]},
+    )
+    result = loader.recall_skill_candidates("请帮我提取图片文字")
+    assert result.bound == ("image-ocr",)
+    assert result.reason == "high_confidence"
+
+
+def test_cjk_trigger_allows_inserted_modifiers_without_generic_bigrams(
+    loader: SkillsLoader, tmp_path: Path
+) -> None:
+    _write_skill(
+        tmp_path / "ws" / "skills",
+        "image-ocr",
+        metadata_json={"description": "处理图片内容与文字", "triggers": ["提取图片文字"]},
+    )
+    result = loader.recall_skill_candidates("帮我提取这张图片里的文字")
+    assert result.bound == ("image-ocr",)
     assert result.reason == "high_confidence"

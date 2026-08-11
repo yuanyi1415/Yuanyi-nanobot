@@ -134,6 +134,7 @@ class SkillLaneDecision:
     candidates: tuple[str, ...] = ()
     bound: tuple[str, ...] = ()
     reason: str = "none"
+    bound_token_estimate: int = 0
 
 
 @dataclass
@@ -766,13 +767,14 @@ class AgentLoop:
         assert ctx.session is not None
         scope = self.workspace_scopes.for_message(ctx.msg, ctx.session.metadata)
         auto_bind: list[str] = []
+        decision: SkillLaneDecision | None = None
         if self.observe_lane or self.skill_auto_bind:
             decision = self._decide_skill_lane(ctx)
             if self.observe_lane:
                 self._observe_lane(ctx, decision)
             if self.skill_auto_bind:
                 auto_bind = list(decision.bound)
-        return self.context.build_messages(
+        messages = self.context.build_messages(
             history=ctx.history,
             current_message=ctx.msg.content,
             media=ctx.msg.media if ctx.kind is TurnKind.USER and ctx.msg.media else None,
@@ -786,6 +788,9 @@ class AgentLoop:
             unified_session=self._unified_session,
             auto_bind_skill_names=auto_bind,
         )
+        if self.observe_lane and decision is not None and (decision.explicit or decision.bound):
+            self._observe_skill_context_loaded(ctx, decision)
+        return messages
 
     def _decide_skill_lane(self, ctx: TurnContext) -> SkillLaneDecision:
         """Deterministic lane decision + local skill recall for one turn.
@@ -810,23 +815,29 @@ class AgentLoop:
             candidates=recall.candidates,
             bound=recall.bound,
             reason=recall.reason,
+            bound_token_estimate=recall.bound_token_estimate,
         )
 
     def _observe_lane(self, ctx: TurnContext, decision: SkillLaneDecision) -> None:
         """Write the FR-1 observability log line (loguru, channel=observability).
 
-        Records the lane decision and skill recall for one ordinary message
-        before prompt build; never touches session history. The message preview
-        honors the session's ``log_content`` policy (hidden as ``[content hidden]``
-        when the session opts out of content logging).
+        Records the lane decision and skill recall before prompt build; never
+        touches session history or logs the user's message body.
         """
-        text = ctx.msg.content if isinstance(ctx.msg.content, str) else ""
-        if ctx.session is not None and not getattr(ctx.session.policy, "log_content", True):
-            preview = "[content hidden]"
-        else:
-            preview = text[:200]
-        logger.bind(channel="observability").info(
-            "skill_lane lane={} turn={} session={} kind={} explicit={} candidates={} bound={} reason={} preview={}",
+        logger.bind(
+            channel="observability",
+            event="skill_lane_decision",
+            lane=decision.lane,
+            turn=ctx.turn_id,
+            session=ctx.session_key,
+            kind=ctx.kind.name,
+            explicit=decision.explicit,
+            candidates=decision.candidates,
+            bound=decision.bound,
+            bound_token_estimate=decision.bound_token_estimate,
+            reason=decision.reason,
+        ).info(
+            "skill_lane event=decision lane={} turn={} session={} kind={} explicit={} candidates={} bound={} bound_token_estimate={} reason={}",
             decision.lane,
             ctx.turn_id,
             ctx.session_key,
@@ -834,8 +845,29 @@ class AgentLoop:
             ",".join(decision.explicit),
             ",".join(decision.candidates),
             ",".join(decision.bound),
+            decision.bound_token_estimate,
             decision.reason,
-            preview,
+        )
+
+    def _observe_skill_context_loaded(self, ctx: TurnContext, decision: SkillLaneDecision) -> None:
+        """Record the successful context-load stage after ContextBuilder returns."""
+        explicit = list(decision.explicit)
+        auto = [name for name in decision.bound if name not in explicit]
+        names = tuple((*explicit, *auto))
+        source = "+".join(part for part, values in (("explicit", explicit), ("auto", auto)) if values)
+        logger.bind(
+            channel="observability",
+            event="skill_context_loaded",
+            turn=ctx.turn_id,
+            session=ctx.session_key,
+            skills=names,
+            source=source,
+        ).info(
+            "skill_lane event=context_loaded turn={} session={} skills={} source={}",
+            ctx.turn_id,
+            ctx.session_key,
+            ",".join(names),
+            source,
         )
 
     def _request_context_for_turn(self, ctx: TurnContext) -> RequestContext:

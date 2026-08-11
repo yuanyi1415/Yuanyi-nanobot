@@ -197,8 +197,9 @@ def test_observe_lane_emits_structured_log(tmp_path: Path) -> None:
     assert "lane=skill" in line
     assert "candidates=github" in line
     assert "bound=github" in line
+    assert "bound_token_estimate=" in line
     assert "reason=high_confidence" in line
-    assert "preview=open a github pr" in line
+    assert "open a github pr" not in line
 
 
 def test_observe_lane_fast_no_binding(tmp_path: Path) -> None:
@@ -242,8 +243,8 @@ def test_observe_lane_ambiguous_candidates_recorded_not_bound(tmp_path: Path) ->
     assert decision.reason == "ambiguous_multi_candidate"
 
 
-def test_observe_lane_hides_preview_when_session_opt_out(tmp_path: Path) -> None:
-    """Content-hiding sessions get a placeholder preview in observability logs."""
+def test_observe_lane_never_logs_message_body(tmp_path: Path) -> None:
+    """Observability remains useful without retaining user-provided content."""
     loop = _make_loop(tmp_path, observe_lane=True)
     ctx = _user_turn(loop, "sensitive secret content")
     ctx.session = SimpleNamespace(policy=SimpleNamespace(log_content=False))
@@ -256,8 +257,22 @@ def test_observe_lane_hides_preview_when_session_opt_out(tmp_path: Path) -> None
         logger.remove(sink_id)
 
     assert logs
-    assert "[content hidden]" in logs[0]
     assert "sensitive secret content" not in logs[0]
+
+
+def test_observe_lane_records_context_loaded_after_auto_binding(tmp_path: Path) -> None:
+    (tmp_path / "skills").mkdir(parents=True)
+    _write_skill(tmp_path / "skills", "github", metadata_json={"description": "github prs"})
+    loop = _make_loop(tmp_path, observe_lane=True, skill_auto_bind=True)
+    logs: list[str] = []
+    sink_id = logger.add(logs.append, level="INFO", format="{message}")
+    try:
+        loop._build_initial_messages(_with_session(_user_turn(loop, "open a github pr")))
+    finally:
+        logger.remove(sink_id)
+
+    assert any("skill_lane event=decision" in line for line in logs)
+    assert any("skill_lane event=context_loaded" in line and "skills=github" in line for line in logs)
 
 
 def test_flags_off_produce_no_observability_log(tmp_path: Path) -> None:

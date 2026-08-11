@@ -27,6 +27,7 @@ _SKILL_ACTIVATIONS = ("auto", "manual", "always", "disabled")
 # Deterministic term matching for local skill recall (FR-3).
 _WORD_TOKEN_RE = re.compile(r"[a-z0-9]+")
 _CJK_TOKEN_RE = re.compile(r"[\u4e00-\u9fff]+")
+_SKILL_PHRASE_RE = re.compile(r"[^a-z0-9\u4e00-\u9fff]+")
 
 
 def _normalize_str_list(value: object) -> tuple[str, ...]:
@@ -112,6 +113,17 @@ class SkillRecallResult:
     candidates: tuple[str, ...] = ()
     bound: tuple[str, ...] = ()
     reason: str = "none"
+    bound_token_estimate: int = 0
+
+
+@dataclass(frozen=True)
+class _SkillFileCacheEntry:
+    """Parsed in-process representation of one unchanged ``SKILL.md`` file."""
+
+    signature: tuple[int, int]
+    content: str
+    frontmatter: dict[str, object] | None
+    fingerprint: str
 
 
 class SkillsLoader:
@@ -127,6 +139,59 @@ class SkillsLoader:
         self.workspace_skills = workspace / "skills"
         self.builtin_skills = builtin_skills_dir or BUILTIN_SKILLS_DIR
         self.disabled_skills = disabled_skills or set()
+        self._skill_file_cache: dict[Path, _SkillFileCacheEntry] = {}
+
+    def _find_skill_path(self, name: str) -> Path | None:
+        """Resolve *name* with the same workspace-over-builtin precedence as loading."""
+        roots = [self.workspace_skills]
+        if self.builtin_skills:
+            roots.append(self.builtin_skills)
+        for root in roots:
+            path = root / name / "SKILL.md"
+            if path.exists():
+                return path
+        return None
+
+    def _read_skill_entry(self, path: Path) -> _SkillFileCacheEntry | None:
+        """Read and parse a Skill file once, invalidating on mtime or size changes."""
+        try:
+            stat = path.stat()
+        except OSError:
+            self._skill_file_cache.pop(path, None)
+            return None
+        signature = (stat.st_mtime_ns, stat.st_size)
+        cached = self._skill_file_cache.get(path)
+        if cached is not None and cached.signature == signature:
+            return cached
+        try:
+            content = path.read_text(encoding="utf-8")
+        except OSError:
+            self._skill_file_cache.pop(path, None)
+            return None
+        entry = _SkillFileCacheEntry(
+            signature=signature,
+            content=content,
+            frontmatter=self._frontmatter_from_content(content),
+            fingerprint=hashlib.sha256(content.encode("utf-8")).hexdigest()[:16],
+        )
+        self._skill_file_cache[path] = entry
+        return entry
+
+    @staticmethod
+    def _frontmatter_from_content(content: str) -> dict[str, object] | None:
+        """Parse frontmatter while keeping YAML-native value types intact."""
+        if not content.startswith("---"):
+            return None
+        match = _STRIP_SKILL_FRONTMATTER.match(content)
+        if not match:
+            return None
+        try:
+            parsed = yaml.safe_load(match.group(1))
+        except yaml.YAMLError:
+            return None
+        if not isinstance(parsed, dict):
+            return None
+        return {str(key): value for key, value in cast(dict[object, object], parsed).items()}
 
     def _skill_entries_from_dir(self, base: Path, source: str, *, skip_names: set[str] | None = None) -> list[dict[str, str]]:
         if not base.exists():
@@ -178,14 +243,9 @@ class SkillsLoader:
         Returns:
             Skill content or None if not found.
         """
-        roots = [self.workspace_skills]
-        if self.builtin_skills:
-            roots.append(self.builtin_skills)
-        for root in roots:
-            path = root / name / "SKILL.md"
-            if path.exists():
-                return path.read_text(encoding="utf-8")
-        return None
+        path = self._find_skill_path(name)
+        entry = self._read_skill_entry(path) if path is not None else None
+        return entry.content if entry is not None else None
 
     def load_skills_for_context(self, skill_names: list[str]) -> str:
         """
@@ -372,24 +432,10 @@ class SkillsLoader:
         Returns:
             Metadata dict or None.
         """
-        content = self.load_skill(name)
-        if not content or not content.startswith("---"):
-            return None
-        match = _STRIP_SKILL_FRONTMATTER.match(content)
-        if not match:
-            return None
-        try:
-            parsed = yaml.safe_load(match.group(1))
-        except yaml.YAMLError:
-            return None
-        if not isinstance(parsed, dict):
-            return None
-        # yaml.safe_load returns native types (int, bool, list, etc.);
-        # keep values as-is so downstream consumers get correct types.
-        metadata: dict[str, object] = {}
-        for key, value in cast(dict[object, object], parsed).items():
-            metadata[str(key)] = value
-        return metadata
+        path = self._find_skill_path(name)
+        entry = self._read_skill_entry(path) if path is not None else None
+        # Return a copy so callers retain the old fresh-dict contract.
+        return dict(entry.frontmatter) if entry is not None and entry.frontmatter is not None else None
 
     # ------------------------------------------------------------------
     # SkillDescriptor + deterministic local recall (FR-2 / FR-3)
@@ -459,8 +505,9 @@ class SkillsLoader:
 
     def _content_fingerprint(self, name: str) -> str:
         """Short stable hash of the SKILL.md body for change detection."""
-        content = self.load_skill(name) or ""
-        return hashlib.sha256(content.encode("utf-8")).hexdigest()[:16]
+        path = self._find_skill_path(name)
+        entry = self._read_skill_entry(path) if path is not None else None
+        return entry.fingerprint if entry is not None else ""
 
     def recall_skill_candidates(
         self,
@@ -473,12 +520,12 @@ class SkillsLoader:
         """Deterministic local skill recall for the skill-guidance lane (FR-3).
 
         Term-overlap matching against each candidate skill's name, description,
-        tags and triggers. Skills that are unavailable, ``disabled``,
+        tags and triggers. Description-only matches remain observable candidates,
+        but automatic binding requires one unique strong phrase hit from the
+        skill name, tags or triggers. This keeps generic prose from injecting an
+        unrelated workflow. Skills that are unavailable, ``disabled``,
         ``manual`` or ``always`` are excluded, as are names in *exclude*
-        (explicit ``$skill`` references). A single high-confidence candidate is
-        bound subject to *max_count* and *token_budget*; ambiguous
-        multi-candidate matches are recorded but never bound (V1 has no LLM
-        selector).
+        (explicit ``$skill`` references).
         """
         if not text:
             return SkillRecallResult()
@@ -486,7 +533,8 @@ class SkillsLoader:
         if not query_tokens:
             return SkillRecallResult()
         excluded = set(exclude or ())
-        scored: list[tuple[int, bool, str]] = []
+        normalized_text = _SKILL_PHRASE_RE.sub("", text.lower())
+        scored: list[tuple[int, int, str]] = []
         for descriptor in self.list_skill_descriptors():
             if descriptor.activation != "auto" or not descriptor.availability:
                 continue
@@ -494,24 +542,35 @@ class SkillsLoader:
                 continue
             score = self._match_score(query_tokens, descriptor)
             if score > 0:
-                name_hit = bool(_tokenize(descriptor.name) & query_tokens)
-                scored.append((score, name_hit, descriptor.name))
+                strong_score = self._strong_match_score(normalized_text, query_tokens, descriptor)
+                scored.append((score, strong_score, descriptor.name))
         if not scored:
             return SkillRecallResult()
         scored.sort(key=lambda item: (-item[0], item[2]))
         candidates = tuple(name for _, _, name in scored)
-        top, second = scored[0], scored[1] if len(scored) > 1 else None
-        if second is not None:
-            # Ambiguous unless the winner is decisive, or the winner has an
-            # exact name hit that the runner-up lacks (name hits are a strong
-            # signal and should not be vetoed by incidental description terms).
-            top_hit, second_hit = top[1], second[1]
-            if top[0] < second[0] * 2 and not (top_hit and not second_hit):
-                return SkillRecallResult(candidates=candidates, reason="ambiguous_multi_candidate")
-        bound = self._bind_with_budget(scored, max_count=max_count, token_budget=token_budget)
+        strong_candidates = [candidate for candidate in scored if candidate[1] > 0]
+        if not strong_candidates:
+            return SkillRecallResult(candidates=candidates, reason="weak_match")
+        # Different explicit activation phrases are an ambiguity, regardless
+        # of their spelling length. Choosing ``github`` over ``git`` merely
+        # because one name has more characters would be false confidence.
+        if len(strong_candidates) > 1:
+            return SkillRecallResult(candidates=candidates, reason="ambiguous_multi_candidate")
+        top = strong_candidates[0]
+        # Automatic loading is deliberately a single-workflow action. The
+        # existing max_count setting remains a compatible ceiling, while a
+        # low-ranked candidate can never be added merely to fill that budget.
+        bound, bound_token_estimate = self._bind_with_budget(
+            [top], max_count=max_count, token_budget=token_budget
+        )
         if not bound:
             return SkillRecallResult(candidates=candidates, reason="budget_limited")
-        return SkillRecallResult(candidates=candidates, bound=bound, reason="high_confidence")
+        return SkillRecallResult(
+            candidates=candidates,
+            bound=bound,
+            reason="high_confidence",
+            bound_token_estimate=bound_token_estimate,
+        )
 
     @staticmethod
     def _match_score(query_tokens: set[str], descriptor: SkillDescriptor) -> int:
@@ -526,13 +585,48 @@ class SkillsLoader:
         score += len(desc_tokens & query_tokens)
         return score
 
+    @staticmethod
+    def _strong_match_score(
+        normalized_text: str, query_tokens: set[str], descriptor: SkillDescriptor
+    ) -> int:
+        """Score exact activation phrases; generic token overlap is not a bind signal."""
+        phrases = (descriptor.name, *descriptor.tags, *descriptor.triggers)
+        strongest = 0
+        for phrase in phrases:
+            normalized_phrase = _SKILL_PHRASE_RE.sub("", phrase.lower())
+            if not normalized_phrase:
+                continue
+            # Two Latin characters (for example ``my``) are too generic to
+            # activate a workflow. CJK bigrams remain useful, so accept them.
+            latin_only = normalized_phrase.isascii()
+            if (latin_only and len(normalized_phrase) < 3) or (
+                not latin_only and len(normalized_phrase) < 2
+            ):
+                continue
+            if normalized_phrase in normalized_text:
+                strongest = max(strongest, 40 + len(normalized_phrase))
+                continue
+            if not latin_only:
+                # Allow natural Chinese wording to insert modifiers into a
+                # trigger ("提取这张图片里的文字") without allowing one
+                # generic bigram such as "内容" to activate a workflow.
+                phrase_bigrams = {
+                    token
+                    for token in _tokenize(normalized_phrase)
+                    if len(token) == 2 and _CJK_TOKEN_RE.fullmatch(token)
+                }
+                shared_bigrams = phrase_bigrams & query_tokens
+                if len(shared_bigrams) >= 2:
+                    strongest = max(strongest, 20 + len(shared_bigrams))
+        return strongest
+
     def _bind_with_budget(
         self,
-        scored: list[tuple[int, bool, str]],
+        scored: Sequence[tuple[int, int, str]],
         *,
         max_count: int,
         token_budget: int,
-    ) -> tuple[str, ...]:
+    ) -> tuple[tuple[str, ...], int]:
         """Greedily bind top candidates until count/token budgets are exhausted."""
         bound: list[str] = []
         total_tokens = 0
@@ -545,4 +639,4 @@ class SkillsLoader:
                 break
             bound.append(name)
             total_tokens += tokens
-        return tuple(bound)
+        return tuple(bound), total_tokens

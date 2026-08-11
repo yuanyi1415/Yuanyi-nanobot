@@ -172,3 +172,27 @@ def test_descriptor_fingerprint_changes_with_body(loader: SkillsLoader, tmp_path
     path.write_text("# v2 changed", encoding="utf-8")
     after = _descriptor(loader, "fing").content_fingerprint
     assert before != after
+
+
+def test_descriptor_reuses_file_cache_until_skill_changes(
+    loader: SkillsLoader, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Unchanged skills are parsed once; a changed file invalidates its entry."""
+    path = _write_skill(tmp_path / "ws" / "skills", "cached", body="# v1")
+    original_read_text = Path.read_text
+    reads = 0
+
+    def _count_reads(self: Path, *args: object, **kwargs: object) -> str:
+        nonlocal reads
+        if self == path:
+            reads += 1
+        return original_read_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", _count_reads)
+    _descriptor(loader, "cached")
+    _descriptor(loader, "cached")
+    assert reads == 1
+
+    path.write_text("# v2 changed", encoding="utf-8")
+    _descriptor(loader, "cached")
+    assert reads == 2
