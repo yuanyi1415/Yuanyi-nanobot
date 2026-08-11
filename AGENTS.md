@@ -4,23 +4,22 @@ This file provides guidance to AI coding agents working with this repository.
 
 nanobot is a lightweight, open-source AI agent framework written in Python with a React/TypeScript WebUI. It centers around a small agent loop that receives messages from chat channels, invokes an LLM provider, executes tools, and manages session memory.
 
-## Collaboration Authority and Safe Development
+## Development Workspace and Safety Boundaries
 
-- The user assigns Codex responsibility for the full nanobot development lifecycle: discovery,
-  architecture, implementation, testing, review, and release preparation. The user's explicit
-  instruction for a task determines Codex's scope; do not redirect work to another coding agent
-  unless the user explicitly asks for that handoff.
-- This checkout is also the user's actively used nanobot instance. Treat it as production: never
-  use it as an experiment target, restart its gateway, modify its live configuration/state, or
-  overwrite its existing uncommitted changes without the user's explicit approval.
-- Perform implementation work in an isolated git worktree and dedicated branch. Before any merge
-  or release-facing action, run the agreed regression checks and obtain the user's approval.
-- Preserve a clear safety boundary between the running instance and development artifacts. Any
-  change that needs a gateway restart, config migration, dependency installation, or data mutation
-  requires explicit user confirmation after its impact is stated.
-- Before any GitHub publish action, treat a successful `gh auth status` as the authentication
-  source of truth. If it fails, do not create publish artifacts or modify a remote; ask the user
-  to re-authenticate and verify again.
+- This checkout (`/Users/yuanyi/Desktop/AI/13_nanobot-dev`) is the sole development repository
+  for this project. All source changes, integration work, tests, branches, commits, and push
+  operations happen here.
+- `/Users/yuanyi/Desktop/AI/13_nanobot` is the user's production checkout. Do not use it for
+  experiments, code changes, configuration changes, dependency changes, gateway restarts, or
+  data mutations. Reading it for comparison is allowed when needed.
+- Development process materials belong in `Yuanyi-研发/`; that directory is local-only and must
+  not contain runtime code. Product source changes belong in their corresponding source and test
+  directories, never in `Yuanyi-研发/`.
+- The managed Git remote is `https://github.com/yuanyi1415/Yuanyi-nanobot.git`. Do not publish
+  from the production checkout. Before any GitHub publish action, treat a successful
+  `gh auth status` as the authentication source of truth.
+- Before any merge, release-facing action, or action that could affect production, run the agreed
+  regression checks and obtain the user's explicit approval.
 
 ## Development Commands
 
