@@ -298,6 +298,7 @@ The Agency Release turns nanobot from a durable workbench into an agent runtime 
 
 ## Recent Updates
 
+- **2026-08-12** File reference chips got a Codex-style visual (accent-blue link, underline, language icon), markdown renders properly in the preview panel with adaptive width, availability probing now invalidates when streaming ends, and the backend tolerates project-name-prefixed relative paths.
 - **2026-07-24** Guided first-run setup, inline subagents, and model switching from the composer.
 - **2026-07-23** Grok OAuth with hosted X Search, live image settings, and clearer fallback models.
 - **2026-07-22** Parallel Search, live configuration reloads, richer app discovery, and a smoother mobile WebUI.
