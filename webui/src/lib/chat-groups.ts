@@ -310,16 +310,20 @@ function groupSessionsByProject(
     });
   }
 
-  groups.sort((a, b) => {
-    const timeOrder = dateToTime(b.updatedAt) - dateToTime(a.updatedAt);
-    if (timeOrder !== 0) return timeOrder;
-    return a.label.localeCompare(b.label, "en", {
-      numeric: true,
-      sensitivity: "base",
+  const projectGroups = groups
+    .filter((group) => group.kind === "project")
+    .sort((a, b) => {
+      const timeOrder = dateToTime(b.updatedAt) - dateToTime(a.updatedAt);
+      if (timeOrder !== 0) return timeOrder;
+      return a.label.localeCompare(b.label, "en", {
+        numeric: true,
+        sensitivity: "base",
+      });
     });
-  });
 
-  return groups;
+  const chatsGroup = groups.find((group) => group.id === "workspace:chats");
+
+  return chatsGroup ? [chatsGroup, ...projectGroups] : projectGroups;
 }
 
 function sortProjectSessions(

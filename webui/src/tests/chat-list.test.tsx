@@ -601,7 +601,7 @@ describe("ChatList", () => {
     expect(within(chatsSection).getByRole("button", { name: "Show less" })).toBeInTheDocument();
   });
 
-  it("sorts Topics section among project groups by recency, not always last", () => {
+  it("pins the Topics group above project groups while project groups keep recency order", () => {
     const sessions = [
       session({
         chatId: "recent-chat",
@@ -646,18 +646,14 @@ describe("ChatList", () => {
     const allRegions = screen.getAllByRole("region");
     const regionNames = allRegions.map((r) => r.getAttribute("aria-label") ?? r.textContent);
 
-    // The most recently updated conversation ("Recent chat" at 12:00) must be
-    // in the first group — Topics should come before both projects.
-    const chatsIdx = regionNames.findIndex((n) => n?.includes("Topics"));
-    const projAIdx = regionNames.findIndex((n) => n?.includes("project-a"));
-    const projBIdx = regionNames.findIndex((n) => n?.includes("project-b"));
-
-    expect(chatsIdx).toBeLessThan(projAIdx);
-    expect(chatsIdx).toBeLessThan(projBIdx);
-    expect(within(allRegions[chatsIdx]).getByText("Recent chat")).toBeInTheDocument();
+    // The Topics group is always pinned first regardless of recency; project
+    // groups still sort among themselves by updatedAt (project-b 11:00 before
+    // project-a 10:00).
+    expect(regionNames).toEqual(["Topics", "project-b", "project-a"]);
+    expect(within(allRegions[0]).getByText("Recent chat")).toBeInTheDocument();
   });
 
-  it("keeps one Projects heading when Topics sorts between project groups", () => {
+  it("keeps one Projects heading when Topics is pinned above project groups", () => {
     const sessions = [
       session({
         chatId: "project-a",
@@ -703,11 +699,11 @@ describe("ChatList", () => {
       .getAllByRole("region")
       .map((r) => r.getAttribute("aria-label") ?? "");
 
-    expect(regionNames).toEqual(["project-a", "Topics", "project-b"]);
+    expect(regionNames).toEqual(["Topics", "project-a", "project-b"]);
     expect(screen.getAllByText("Projects")).toHaveLength(1);
   });
 
-  it("keeps Topics last when its latest conversation is older than all projects", () => {
+  it("pins Topics above project groups even when its conversations are least recent", () => {
     const sessions = [
       session({
         chatId: "project-a",
@@ -753,7 +749,90 @@ describe("ChatList", () => {
       .getAllByRole("region")
       .map((r) => r.getAttribute("aria-label") ?? "");
 
-    expect(regionNames).toEqual(["project-a", "project-b", "Topics"]);
+    expect(regionNames).toEqual(["Topics", "project-a", "project-b"]);
     expect(screen.getAllByText("Projects")).toHaveLength(1);
+  });
+
+  it("R-01: pins the Topics group above project groups even when a project was updated most recently", () => {
+    const sessions = [
+      session({
+        chatId: "hot-project",
+        title: "Hot project task",
+        updatedAt: "2026-05-21T12:00:00Z",
+        workspaceScope: {
+          project_path: "/Users/me/hot-project",
+          project_name: "hot-project",
+          access_mode: "restricted",
+        },
+      }),
+      session({
+        chatId: "old-topic",
+        title: "Old topic",
+        updatedAt: "2026-05-21T09:00:00Z",
+      }),
+    ];
+
+    render(
+      <ChatList
+        sessions={sessions}
+        activeKey="websocket:old-topic"
+        onSelect={vi.fn()}
+        onRequestDelete={vi.fn()}
+        onTogglePin={vi.fn()}
+        onRequestRename={vi.fn()}
+        onToggleArchive={vi.fn()}
+        showTimestamps
+      />,
+    );
+
+    const regionNames = screen
+      .getAllByRole("region")
+      .map((r) => r.getAttribute("aria-label") ?? "");
+
+    expect(regionNames).toEqual(["Topics", "hot-project"]);
+    expect(screen.getAllByText("Projects")).toHaveLength(1);
+  });
+
+  it("R-02: keeps pinned conversations first inside the Topics group", () => {
+    const sessions = [
+      session({
+        chatId: "newer-topic",
+        title: "Newer topic",
+        updatedAt: "2026-05-21T12:00:00Z",
+      }),
+      session({
+        chatId: "pinned-topic",
+        title: "Pinned topic",
+        updatedAt: "2026-05-21T09:00:00Z",
+      }),
+      session({
+        chatId: "project-a",
+        title: "Project A task",
+        updatedAt: "2026-05-21T10:00:00Z",
+        workspaceScope: {
+          project_path: "/Users/me/project-a",
+          project_name: "project-a",
+          access_mode: "restricted",
+        },
+      }),
+    ];
+
+    render(
+      <ChatList
+        sessions={sessions}
+        activeKey="websocket:newer-topic"
+        onSelect={vi.fn()}
+        onRequestDelete={vi.fn()}
+        onTogglePin={vi.fn()}
+        onRequestRename={vi.fn()}
+        onToggleArchive={vi.fn()}
+        pinnedKeys={["websocket:pinned-topic"]}
+        showTimestamps
+      />,
+    );
+
+    const chatsSection = screen.getByRole("region", { name: "Topics" });
+    const text = chatsSection.textContent ?? "";
+    expect(text.indexOf("Pinned topic")).toBeLessThan(text.indexOf("Newer topic"));
   });
 });
