@@ -1407,7 +1407,9 @@
       "manual": "Tempel path",
       "manualPlaceholder": "/Users/name/project",
       "usePath": "Gunakan path",
-      "absolutePathRequired": "Masukkan path folder absolut di mesin ini."
+      "absolutePathRequired": "Masukkan path folder absolut di mesin ini.",
+      "browse": "Jelajahi…",
+      "clearProject": "Hapus proyek"
     }
   }
 }

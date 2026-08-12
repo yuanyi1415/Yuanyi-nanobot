@@ -1109,9 +1109,6 @@ function Shell({
       setView(route.view);
       setSettingsInitialSection(route.settingsSection);
       setWorkspaceError(null);
-      if (route.view === "chat" && !route.activeKey) {
-        setDraftWorkspaceScope(null);
-      }
     };
     window.addEventListener("hashchange", applyRoute);
     return () => window.removeEventListener("hashchange", applyRoute);

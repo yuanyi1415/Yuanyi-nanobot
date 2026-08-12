@@ -1407,7 +1407,9 @@
       "manual": "パスを貼り付け",
       "manualPlaceholder": "/Users/name/project",
       "usePath": "パスを使用",
-      "absolutePathRequired": "このマシン上の絶対フォルダーパスを入力してください。"
+      "absolutePathRequired": "このマシン上の絶対フォルダーパスを入力してください。",
+      "browse": "参照…",
+      "clearProject": "プロジェクトをクリア"
     }
   }
 }

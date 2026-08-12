@@ -46,6 +46,7 @@ import { fetchWithTimeout } from "./http";
 const API_READ_TIMEOUT_MS = 20_000;
 const API_MUTATION_TIMEOUT_MS = 20_000;
 const PACKAGE_MUTATION_TIMEOUT_MS = 150_000;
+const PICK_FOLDER_TIMEOUT_MS = 600_000;
 const SLASH_COMMAND_LIFECYCLES = new Set<SlashCommandLifecycle>([
   "side_channel",
   "finalize_active_turn",
@@ -463,6 +464,21 @@ export async function fetchWorkspaces(
     token,
     undefined,
     API_READ_TIMEOUT_MS,
+  );
+}
+
+/** Result of the macOS native folder picker; ``cancelled`` is never an error. */
+export type PickFolderResult = { path: string } | { cancelled: true };
+
+export async function fetchPickFolder(
+  token: string,
+  base: string = "",
+): Promise<PickFolderResult> {
+  return request<PickFolderResult>(
+    `${base}/api/workspace/pick-folder`,
+    token,
+    undefined,
+    PICK_FOLDER_TIMEOUT_MS,
   );
 }
 

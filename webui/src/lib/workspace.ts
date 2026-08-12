@@ -39,6 +39,7 @@ export function selectedProjectScope(
   defaultScope: WorkspaceScopePayload | null,
 ): WorkspaceScopePayload | null {
   if (!scope || !defaultScope) return null;
+  if (!scope.project_path.trim()) return null;
   return sameWorkspacePath(scope.project_path, defaultScope.project_path) ? null : scope;
 }
 

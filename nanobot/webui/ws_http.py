@@ -116,6 +116,10 @@ from nanobot.webui.skills_marketplace import (
 )
 from nanobot.webui.thread_disk import delete_webui_thread
 from nanobot.webui.transcript import build_webui_thread_response
+from nanobot.webui.workspace_api import (
+    WorkspaceDirectoryError,
+    pick_folder_payload,
+)
 from nanobot.webui.workspaces import WebUIWorkspaceController
 
 _SLOW_WEBUI_HTTP_LOG_MS = 1_000
@@ -1029,6 +1033,8 @@ class GatewayHTTPHandler:
             return self._handle_commands(request)
         if got == "/api/workspaces":
             return self._handle_workspaces(connection, request)
+        if got == "/api/workspace/pick-folder":
+            return await self._handle_workspace_pick_folder(connection, request)
         if got == "/api/webui/skills/search":
             return await self._handle_webui_skills_search(request)
         if got == "/api/webui/skills/trending":
@@ -1065,6 +1071,21 @@ class GatewayHTTPHandler:
                 controls_available=self.workspace_controls_available(connection)
             )
         )
+
+    async def _handle_workspace_pick_folder(
+        self,
+        connection: Any,
+        request: WsRequest,
+    ) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        if not _is_local_browser_request(connection, request.headers):
+            return _http_error(403, "folder picker is only available from a local browser")
+        try:
+            payload = await asyncio.to_thread(pick_folder_payload)
+        except WorkspaceDirectoryError as exc:
+            return _http_error(exc.status, exc.message)
+        return _http_json_response(payload)
 
     def _handle_webui_skills(self, request: WsRequest) -> Response:
         if not self.check_api_token(request):

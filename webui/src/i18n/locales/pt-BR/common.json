@@ -1407,7 +1407,9 @@
       "manual": "Colar caminho",
       "manualPlaceholder": "/Users/nome/projeto",
       "usePath": "Usar caminho",
-      "absolutePathRequired": "Informe um caminho absoluto de pasta nesta máquina."
+      "absolutePathRequired": "Informe um caminho absoluto de pasta nesta máquina.",
+      "browse": "Navegar…",
+      "clearProject": "Limpar projeto"
     }
   }
 }

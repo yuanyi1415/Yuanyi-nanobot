@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from "react";
-import { AlertTriangle, Check, ChevronDown, Folder, Hand } from "lucide-react";
+import { AlertTriangle, Check, ChevronDown, Folder, Hand, Loader2, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
@@ -19,6 +19,8 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import { fetchPickFolder } from "@/lib/api";
+import { isLoopbackHost } from "@/lib/network";
 import type {
   WorkspaceAccessMode,
   WorkspaceScopePayload,
@@ -33,6 +35,7 @@ import {
   selectedProjectScope,
   shortWorkspacePath,
 } from "@/lib/workspace";
+import { useClient } from "@/providers/ClientProvider";
 
 function workspacePathPlaceholder(defaultWorkspacePath: string, macPlaceholder: string): string {
   const normalized = defaultWorkspacePath.trim().replace(/\\/g, "/");
@@ -68,9 +71,11 @@ export function WorkspaceProjectPicker({
   const [pathDraft, setPathDraft] = useState("");
   const [pathError, setPathError] = useState<string | null>(null);
   const [pickingFolder, setPickingFolder] = useState(false);
+  const [browseActive, setBrowseActive] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const pathInputRef = useRef<HTMLInputElement>(null);
   const pathErrorId = useId();
+  const browseAvailable = typeof window !== "undefined" && isLoopbackHost(window.location.hostname);
   const currentProjectScope = selectedProjectScope(scope, defaultScope);
   const projectLabel = currentProjectScope
     ? currentProjectScope.project_name || projectNameFromPath(currentProjectScope.project_path)
@@ -124,6 +129,20 @@ export function WorkspaceProjectPicker({
     },
     [defaultScope, onChange, scope, t],
   );
+
+  const clearProject = useCallback(() => {
+    const base = scope ?? defaultScope;
+    if (!base || !onChange) return;
+    onChange({
+      ...base,
+      project_path: "",
+      project_name: "",
+      restrict_to_workspace: false,
+    });
+    setPathDraft("");
+    setPathError(null);
+    setOpen(false);
+  }, [defaultScope, onChange, scope]);
 
   const pickNativeFolder = useCallback(async () => {
     if (!pickFolder || disabled) return;
@@ -204,6 +223,17 @@ export function WorkspaceProjectPicker({
             ) : null}
           </button>
         </PopoverTrigger>
+          {!compact && currentProjectScope ? (
+            <button
+              type="button"
+              aria-label={t("workspace.dialog.clearProject")}
+              title={t("workspace.dialog.clearProject")}
+              onClick={clearProject}
+              className="thread-composer-action touch-target -ml-1 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-muted-foreground/70 transition-colors hover:bg-muted/60 hover:text-foreground"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          ) : null}
         <PopoverContent
           align="start"
           side="bottom"
@@ -261,6 +291,26 @@ export function WorkspaceProjectPicker({
                   "focus-visible:ring-1 focus-visible:ring-foreground/10 focus-visible:ring-offset-0",
                 )}
               />
+              {browseAvailable ? (
+                browseActive ? (
+                  <BrowseFolderActive
+                    onPicked={(path) => {
+                      setBrowseActive(false);
+                      applyProjectPath(path);
+                    }}
+                    onError={(message) => setPathError(message)}
+                    onDone={() => setBrowseActive(false)}
+                  />
+                ) : (
+                  <Button
+                    type="button"
+                    onClick={() => setBrowseActive(true)}
+                    className="h-9 shrink-0 rounded-full px-3 text-[12px]"
+                  >
+                    {t("workspace.dialog.browse")}
+                  </Button>
+                )
+              ) : null}
               <Button
                 type="submit"
                 disabled={disabled || !pathDraft.trim()}
@@ -287,6 +337,66 @@ export function WorkspaceProjectPicker({
         </span>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * macOS native folder picker trigger. Mounted only for loopback hosts; the
+ * picker itself is mounted only after the user clicks, so ``useClient`` is
+ * never touched in test trees that lack a ClientProvider.
+ */
+function BrowseFolderActive({
+  onPicked,
+  onError,
+  onDone,
+}: {
+  onPicked: (path: string) => void;
+  onError: (message: string) => void;
+  onDone: () => void;
+}) {
+  const { t } = useTranslation();
+  const { getToken } = useClient();
+  // Callbacks are recreated on every render; keep them in refs so the
+  // picker effect below runs exactly once per mount. Without this, any
+  // parent re-render re-runs the effect and spawns another dialog.
+  const getTokenRef = useRef(getToken);
+  const onPickedRef = useRef(onPicked);
+  const onErrorRef = useRef(onError);
+  const onDoneRef = useRef(onDone);
+  useEffect(() => {
+    getTokenRef.current = getToken;
+    onPickedRef.current = onPicked;
+    onErrorRef.current = onError;
+    onDoneRef.current = onDone;
+  });
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const result = await fetchPickFolder(getTokenRef.current());
+        if (cancelled) return;
+        if ("path" in result && result.path) {
+          onPickedRef.current(result.path);
+        }
+        // cancelled → 用户关闭了系统对话框，静默忽略
+      } catch (err) {
+        if (!cancelled) onErrorRef.current(err instanceof Error ? err.message : String(err));
+      } finally {
+        if (!cancelled) onDoneRef.current();
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount once; callbacks via refs
+  }, []);
+
+  return (
+    <Button type="button" disabled className="h-9 shrink-0 rounded-full px-3 text-[12px]">
+      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+      {t("workspace.dialog.browse")}
+    </Button>
   );
 }
 

@@ -1407,7 +1407,9 @@
       "manual": "Paste path",
       "manualPlaceholder": "/Users/name/project",
       "usePath": "Use Path",
-      "absolutePathRequired": "Enter an absolute folder path on this machine."
+      "absolutePathRequired": "Enter an absolute folder path on this machine.",
+      "browse": "Browse…",
+      "clearProject": "Clear project"
     }
   }
 }

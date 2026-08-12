@@ -1407,7 +1407,9 @@
       "manual": "Coller un chemin",
       "manualPlaceholder": "/Users/name/project",
       "usePath": "Utiliser le chemin",
-      "absolutePathRequired": "Saisissez un chemin absolu de dossier sur cette machine."
+      "absolutePathRequired": "Saisissez un chemin absolu de dossier sur cette machine.",
+      "browse": "Parcourir…",
+      "clearProject": "Effacer le projet"
     }
   }
 }

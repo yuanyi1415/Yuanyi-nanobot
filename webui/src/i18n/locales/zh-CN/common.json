@@ -1407,7 +1407,9 @@
       "manual": "粘贴路径",
       "manualPlaceholder": "/Users/name/project",
       "usePath": "使用路径",
-      "absolutePathRequired": "请输入这台机器上的绝对文件夹路径。"
+      "absolutePathRequired": "请输入这台机器上的绝对文件夹路径。",
+      "browse": "浏览…",
+      "clearProject": "清除项目"
     }
   }
 }

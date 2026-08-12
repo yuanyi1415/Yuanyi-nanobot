@@ -1407,7 +1407,9 @@
       "manual": "Dán đường dẫn",
       "manualPlaceholder": "/Users/name/project",
       "usePath": "Dùng đường dẫn",
-      "absolutePathRequired": "Nhập đường dẫn thư mục tuyệt đối trên máy này."
+      "absolutePathRequired": "Nhập đường dẫn thư mục tuyệt đối trên máy này.",
+      "browse": "Duyệt…",
+      "clearProject": "Xóa dự án"
     }
   }
 }
