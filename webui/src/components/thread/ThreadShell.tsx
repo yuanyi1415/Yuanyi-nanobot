@@ -843,7 +843,21 @@ export function ThreadShell({
     () => new Map<string, FilePreviewAvailabilityCacheEntry>(),
     [historyKey],
   );
-  const filePreviewAvailabilityRevision = displayMessages.length;
+  /**
+   * Bumped once each time a message stream finishes (``isStreaming`` flips
+   * true → false).  Entries cached with ``available === false`` from a stale
+   * revision are re-probed on the next lookup, so files that were mid-write
+   * while streaming (probe 404) become clickable once the turn completes.
+   * Event-driven only — no polling.
+   */
+  const [filePreviewAvailabilityRevision, setFilePreviewAvailabilityRevision] = useState(0);
+  const wasStreamingRef = useRef(isStreaming);
+  useEffect(() => {
+    if (wasStreamingRef.current && !isStreaming) {
+      setFilePreviewAvailabilityRevision((revision) => revision + 1);
+    }
+    wasStreamingRef.current = isStreaming;
+  }, [isStreaming]);
   const resolveFilePreviewAvailability = useCallback((path: string) => {
     if (!historyKey) return Promise.resolve(false);
     const cached = filePreviewAvailabilityCache.get(path);

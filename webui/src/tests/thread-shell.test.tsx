@@ -472,6 +472,81 @@ describe("ThreadShell", () => {
     expect(screen.queryByText("failed to read file")).not.toBeInTheDocument();
   });
 
+  it("re-probes file availability once after a streamed turn completes", async () => {
+    await preloadMarkdownText();
+    const client = makeClient();
+    let probeCalls = 0;
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("websocket%3Astream-cache/webui-thread")) {
+        return Promise.resolve(httpJson(transcriptFromSimpleMessages([
+          { role: "user", content: "read this" },
+          { role: "assistant", content: "See `prompts/dream.md`" },
+        ])));
+      }
+      if (url.includes("file-preview?path=prompts%2Fdream.md&probe=1")) {
+        probeCalls += 1;
+        return probeCalls === 1
+          ? Promise.resolve({
+            ok: false,
+            status: 500,
+            text: async () => "file not ready yet",
+            json: async () => ({}),
+          } as Response)
+          : Promise.resolve(httpJson({ available: true }));
+      }
+      return Promise.resolve({
+        ok: false,
+        status: 404,
+        json: async () => ({}),
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(wrap(
+      client,
+      <ThreadShell
+        session={session("stream-cache")}
+        title="Stream cache"
+        onToggleSidebar={() => {}}
+      />,
+    ));
+
+    const reference = await screen.findByTestId("inline-file-path");
+    await waitFor(() => expect(probeCalls).toBe(1));
+    expect(reference).not.toHaveAttribute("role");
+
+    await act(async () => {
+      client._emitChat("stream-cache", {
+        event: "delta",
+        chat_id: "stream-cache",
+        text: "See `prompts/dream.md`",
+        turn_id: "t1",
+      });
+    });
+    // Wait for the streamed message (and its file reference) to render so the
+    // ``isStreaming`` flip is observed as a separate React commit.
+    await waitFor(() => {
+      expect(screen.getAllByTestId("inline-file-path").length).toBeGreaterThanOrEqual(2);
+    });
+
+    await act(async () => {
+      client._emitChat("stream-cache", {
+        event: "turn_end",
+        chat_id: "stream-cache",
+        turn_id: "t1",
+      });
+    });
+
+    // The finished stream invalidates the stale "available: false" cache, so
+    // the file is probed again and becomes interactive once it exists.
+    await waitFor(() => expect(probeCalls).toBeGreaterThanOrEqual(2));
+    await waitFor(() => {
+      const references = screen.getAllByTestId("inline-file-path");
+      expect(references.some((item) => item.getAttribute("role") === "button")).toBe(true);
+    });
+  });
+
   it("does not navigate away when clicking the chat title", async () => {
     const client = makeClient();
     const onGoHome = vi.fn();

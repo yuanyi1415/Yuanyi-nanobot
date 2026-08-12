@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 
 import { CodeBlock } from "@/components/CodeBlock";
 import { splitFilePath } from "@/components/FileReferenceChip";
+import { MarkdownText } from "@/components/MarkdownText";
 import { ApiError, fetchFilePreview } from "@/lib/api";
 import type { FilePreviewPayload } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -237,15 +238,21 @@ export function FilePreviewPanel({
                     })}
                   </div>
                 ) : null}
-                <CodeBlock
-                  language={state.payload.language}
-                  code={state.payload.content}
-                  chrome="none"
-                  highlight
-                  showLineNumbers
-                  wrapLongLines={false}
-                  className="min-h-full"
-                />
+                {state.payload.language === "markdown" ? (
+                  <div className="w-full min-w-0 px-4 py-3 [overflow-wrap:anywhere]">
+                    <MarkdownText>{state.payload.content}</MarkdownText>
+                  </div>
+                ) : (
+                  <CodeBlock
+                    language={state.payload.language}
+                    code={state.payload.content}
+                    chrome="none"
+                    highlight
+                    showLineNumbers
+                    wrapLongLines={false}
+                    className="min-h-full"
+                  />
+                )}
               </div>
             )}
           </div>

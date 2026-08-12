@@ -1,4 +1,5 @@
 import type { KeyboardEvent, MouseEvent } from "react";
+import { useTranslation } from "react-i18next";
 
 import {
   Tooltip,
@@ -28,6 +29,7 @@ interface FileReferenceChipProps {
   className?: string;
   textClassName?: string;
   previewPath?: string;
+  unavailable?: boolean;
   onOpen?: (path: string) => void;
   testId?: string;
 }
@@ -40,9 +42,11 @@ export function FileReferenceChip({
   className,
   textClassName,
   previewPath,
+  unavailable = false,
   onOpen,
   testId = "inline-file-path",
 }: FileReferenceChipProps) {
+  const { t } = useTranslation();
   const { directory, name } = splitFilePath(path);
   const kind = fileKindForPath(path);
   const displayText = display === "path" ? path.replace(/\\/g, "/") : name;
@@ -69,17 +73,33 @@ export function FileReferenceChip({
             <span
               data-testid={testId}
               aria-label={fullPath}
+              title={unavailable
+                ? t("fileReference.unavailable", {
+                    defaultValue: "File no longer available",
+                  })
+                : undefined}
               role={interactive ? "button" : undefined}
               tabIndex={interactive ? 0 : undefined}
               onClick={interactive ? openPreview : undefined}
               onKeyDown={interactive ? onKeyDown : undefined}
               className={cn(
-                "inline-flex max-w-full items-baseline gap-[0.28em] font-medium leading-[inherit]",
-                "text-sky-600 transition-colors hover:text-sky-700",
-                "dark:text-sky-300 dark:hover:text-sky-200",
+                "inline-flex max-w-full items-baseline gap-[0.22em] font-[550] leading-[inherit]",
+                "rounded-[3px] px-px text-[#2563eb] dark:text-[#7ab7ff]",
+                "underline decoration-[rgba(37,99,235,0.45)] decoration-[1.5px] underline-offset-[2.5px]",
+                "dark:decoration-[rgba(122,183,255,0.5)]",
+                "transition-[color,background-color,text-decoration-color] duration-[120ms]",
+                "hover:text-[#1d4ed8] hover:bg-[rgba(37,99,235,0.10)] hover:decoration-current",
+                "dark:hover:text-[#9cc6ff] dark:hover:bg-[rgba(122,183,255,0.12)]",
                 interactive && [
-                  "cursor-pointer rounded-[5px]",
-                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400/45",
+                  "cursor-pointer",
+                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(37,99,235,0.45)]",
+                  "dark:focus-visible:ring-[rgba(122,183,255,0.5)]",
+                ],
+                unavailable && [
+                  "cursor-not-allowed text-muted-foreground/65 decoration-dashed decoration-muted-foreground/45",
+                  "dark:text-muted-foreground/65",
+                  "hover:bg-transparent hover:text-muted-foreground/65 dark:hover:bg-transparent",
+                  "hover:decoration-muted-foreground/45",
                 ],
               )}
             >
@@ -94,8 +114,8 @@ export function FileReferenceChip({
               >
                 {display === "path" && directory ? (
                   <>
-                    <span className="text-muted-foreground/65">{directory}</span>
-                    <span className="font-semibold text-sky-700 dark:text-sky-200">{name}</span>
+                    <span className="min-w-0 opacity-70">{directory}</span>
+                    <span className="font-semibold">{name}</span>
                   </>
                 ) : (
                   displayText
@@ -198,7 +218,7 @@ export function FileReferenceIcon({ kind }: { kind: FileReferenceKind }) {
     return (
       <svg
         aria-hidden
-        className="h-[1em] w-[1em] shrink-0 translate-y-[0.12em]"
+        className="h-[0.95em] w-[0.95em] shrink-0 translate-y-[0.12em]"
         viewBox="0 0 24 24"
       >
         <path
@@ -218,7 +238,7 @@ export function FileReferenceIcon({ kind }: { kind: FileReferenceKind }) {
     return (
       <svg
         aria-hidden
-        className="h-[0.92em] w-[0.92em] shrink-0 translate-y-[0.11em] text-sky-500 dark:text-sky-300"
+        className="h-[0.95em] w-[0.95em] shrink-0 translate-y-[0.11em] text-[#3178c6]"
         viewBox="0 0 24 24"
         fill="none"
         stroke="currentColor"
@@ -237,7 +257,7 @@ export function FileReferenceIcon({ kind }: { kind: FileReferenceKind }) {
     return (
       <svg
         aria-hidden
-        className="h-[0.92em] w-[0.92em] shrink-0 translate-y-[0.11em] text-sky-500 dark:text-sky-300"
+        className="h-[0.95em] w-[0.95em] shrink-0 translate-y-[0.11em] text-muted-foreground/80"
         viewBox="0 0 24 24"
         fill="none"
         stroke="currentColor"
@@ -250,11 +270,15 @@ export function FileReferenceIcon({ kind }: { kind: FileReferenceKind }) {
       </svg>
     );
   }
+  const colorClass = fileKindColorClass(kind);
   const label = fileKindLabel(kind);
   return (
     <svg
       aria-hidden
-      className="h-[0.96em] w-[0.96em] shrink-0 translate-y-[0.12em] text-sky-500 dark:text-sky-300"
+      className={cn(
+        "h-[0.95em] w-[0.95em] shrink-0 translate-y-[0.12em]",
+        colorClass,
+      )}
       viewBox="0 0 24 24"
       fill="none"
     >
@@ -283,6 +307,27 @@ export function FileReferenceIcon({ kind }: { kind: FileReferenceKind }) {
       </text>
     </svg>
   );
+}
+
+function fileKindColorClass(kind: FileReferenceKind): string {
+  switch (kind) {
+    case "css":
+      return "text-[#663399]";
+    case "html":
+      return "text-[#e34c26]";
+    case "javascript":
+      return "text-[#f1e05a]";
+    case "json":
+      return "text-[#292929] dark:text-[#8b949e]";
+    case "markdown":
+      return "text-[#519aba]";
+    case "notebook":
+      return "text-[#da5b0b] dark:text-[#f0893f]";
+    case "typescript":
+      return "text-[#3178c6]";
+    default:
+      return "text-muted-foreground/80";
+  }
 }
 
 function fileKindLabel(kind: FileReferenceKind): string {

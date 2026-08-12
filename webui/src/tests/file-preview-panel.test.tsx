@@ -26,6 +26,23 @@ vi.mock("@/components/CodeBlock", () => ({
   ),
 }));
 
+vi.mock("@/components/MarkdownText", () => ({
+  MarkdownText: ({
+    children,
+    onOpenFilePreview,
+  }: {
+    children: string;
+    onOpenFilePreview?: unknown;
+  }) => (
+    <div
+      data-testid="mock-markdown-text"
+      data-onopen={onOpenFilePreview ? "yes" : "no"}
+    >
+      {children}
+    </div>
+  ),
+}));
+
 vi.mock("@/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/api")>();
   return {
@@ -46,8 +63,10 @@ describe("FilePreviewPanel", () => {
     vi.mocked(fetchFilePreview).mockResolvedValue({
       path: "/Users/hr/workspace/quicksort.py",
       display_path: "quicksort.py",
+      project_path: "",
       language: "python",
       content: "print('ok')",
+      size: 0,
       truncated: false,
     });
 
@@ -76,12 +95,14 @@ describe("FilePreviewPanel", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it("updates translated chrome without refetching the open file", async () => {
+  it("renders markdown files through the markdown branch instead of a code block", async () => {
     vi.mocked(fetchFilePreview).mockResolvedValue({
       path: "/workspace/notes.md",
       display_path: "notes.md",
+      project_path: "",
       language: "markdown",
-      content: "# Notes",
+      content: "# Notes\n\nHello **world**",
+      size: 0,
       truncated: false,
     });
 
@@ -94,7 +115,58 @@ describe("FilePreviewPanel", () => {
       />,
     );
 
-    await screen.findByTestId("mock-code-block");
+    const markdown = await screen.findByTestId("mock-markdown-text");
+    expect(markdown).toHaveTextContent("# Notes");
+    expect(markdown).toHaveAttribute("data-onopen", "no");
+    expect(screen.queryByTestId("mock-code-block")).not.toBeInTheDocument();
+  });
+
+  it("wraps the markdown branch in a width-adaptive container", async () => {
+    vi.mocked(fetchFilePreview).mockResolvedValue({
+      path: "/workspace/notes.md",
+      display_path: "notes.md",
+      project_path: "",
+      language: "markdown",
+      content: "# Notes",
+      size: 0,
+      truncated: false,
+    });
+
+    render(
+      <FilePreviewPanel
+        sessionKey="websocket:chat-1"
+        path="notes.md"
+        token="tok"
+        onClose={() => {}}
+      />,
+    );
+
+    const markdown = await screen.findByTestId("mock-markdown-text");
+    const container = markdown.parentElement;
+    expect(container).toHaveClass("w-full", "min-w-0", "[overflow-wrap:anywhere]");
+  });
+
+  it("updates translated chrome without refetching the open file", async () => {
+    vi.mocked(fetchFilePreview).mockResolvedValue({
+      path: "/workspace/notes.md",
+      display_path: "notes.md",
+      project_path: "",
+      language: "markdown",
+      content: "# Notes",
+      size: 0,
+      truncated: false,
+    });
+
+    render(
+      <FilePreviewPanel
+        sessionKey="websocket:chat-1"
+        path="notes.md"
+        token="tok"
+        onClose={() => {}}
+      />,
+    );
+
+    await screen.findByTestId("mock-markdown-text");
     expect(fetchFilePreview).toHaveBeenCalledTimes(1);
 
     await act(async () => {

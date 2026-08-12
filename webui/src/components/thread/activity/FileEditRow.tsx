@@ -11,6 +11,7 @@ import {
 import { useTranslation } from "react-i18next";
 
 import { FileReferenceChip } from "@/components/FileReferenceChip";
+import { useFilePreviewAvailabilityResolver } from "@/components/FilePreviewAvailabilityContext";
 import { codeLanguageFromPath } from "@/lib/code-language";
 import {
   hasRenderableFileDiff,
@@ -90,6 +91,31 @@ function FileEditRow({
   onOpenFilePreview?: (path: string) => void;
 }) {
   const { t } = useTranslation();
+  const resolver = useFilePreviewAvailabilityResolver();
+  const previewTarget = edit.absolute_path || edit.path;
+  const [availability, setAvailability] = useState<
+    "checking" | "available" | "unavailable"
+  >("checking");
+
+  useEffect(() => {
+    if (!resolver) {
+      setAvailability("available");
+      return;
+    }
+    let cancelled = false;
+    setAvailability("checking");
+    resolver(previewTarget)
+      .then((ok) => {
+        if (!cancelled) setAvailability(ok ? "available" : "unavailable");
+      })
+      .catch(() => {
+        if (!cancelled) setAvailability("unavailable");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [previewTarget, resolver]);
+
   const editing = edit.status === "editing";
   const failed = edit.status === "error";
   const action = fileEditAction(edit, editing, failed);
@@ -129,12 +155,13 @@ function FileEditRow({
               <span className="shrink-0">{action}</span>
               <FileReferenceChip
                 path={edit.path}
-                previewPath={edit.absolute_path || edit.path}
-                onOpen={onOpenFilePreview}
+                previewPath={previewTarget}
+                onOpen={availability === "available" ? onOpenFilePreview : undefined}
+                unavailable={availability === "unavailable"}
                 display="path"
                 active={editing}
                 className="min-w-0"
-                textClassName="truncate text-[12px]"
+                textClassName="truncate text-[13px]"
                 testId="activity-file-reference"
               />
               {hasCountedDiff ? <DiffPair added={edit.added} deleted={edit.deleted} /> : null}
