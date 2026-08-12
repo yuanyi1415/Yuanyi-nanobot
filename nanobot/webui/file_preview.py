@@ -86,17 +86,39 @@ def _resolve_preview_path(raw_path: str | None, *, scope: WorkspaceScope) -> Pat
     if len(path) > 4096:
         raise WebUIFilePreviewError(400, "path is too long")
 
-    try:
+    def _resolve(candidate: str) -> Path:
         extra_roots = [get_media_dir()] if scope.restrict_to_workspace else None
-        resolved = resolve_allowed_path(
-            path,
+        return resolve_allowed_path(
+            candidate,
             workspace=scope.project_path,
             allowed_root=scope.project_path if scope.restrict_to_workspace else None,
             extra_allowed_roots=extra_roots,
             strict=True,
         )
-    except FileNotFoundError as e:
-        raise WebUIFilePreviewError(404, "file not found") from e
+
+    def _resolve_retry(candidate: str) -> Path:
+        try:
+            return _resolve(candidate)
+        except FileNotFoundError as e:
+            raise WebUIFilePreviewError(404, "file not found") from e
+        except WorkspaceBoundaryError as e:
+            raise WebUIFilePreviewError(403, "file is outside the current workspace") from e
+        except OSError as e:
+            raise WebUIFilePreviewError(400, "invalid path") from e
+
+    try:
+        resolved = _resolve(path)
+    except FileNotFoundError as first_error:
+        # Tolerate references that repeat the project directory name as a
+        # prefix (e.g. "qizicheng-skill管理删除优化/01_docs/..." when the
+        # session project_path is ".../qizicheng-skill管理删除优化"): strip
+        # one leading "<project name>/" and retry once.  First-resolution
+        # behavior for normal relative/absolute paths is unchanged.
+        project_name = scope.project_path.name
+        project_prefix = f"{project_name}/"
+        if not project_name or not path.startswith(project_prefix):
+            raise WebUIFilePreviewError(404, "file not found") from first_error
+        resolved = _resolve_retry(path[len(project_prefix):])
     except WorkspaceBoundaryError as e:
         raise WebUIFilePreviewError(403, "file is outside the current workspace") from e
     except OSError as e:
