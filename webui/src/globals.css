@@ -666,22 +666,49 @@
      overlay scrollbar hides until the user actively scrolls — invisible
      scrollbars made wide tables look clipped with no way to reach the far
      columns.  Matches the WebUI's general muted scrollbar look. */
-  [data-testid="markdown-data-table"] {
+  [data-testid="markdown-data-table"],
+  [data-file-preview-scroll] {
     scrollbar-width: thin; /* Firefox */
   }
-  [data-testid="markdown-data-table"]::-webkit-scrollbar {
+  [data-testid="markdown-data-table"]::-webkit-scrollbar,
+  [data-file-preview-scroll]::-webkit-scrollbar {
     -webkit-appearance: none;
     height: 10px;
     width: 10px;
   }
-  [data-testid="markdown-data-table"]::-webkit-scrollbar-thumb {
+  [data-testid="markdown-data-table"]::-webkit-scrollbar-thumb,
+  [data-file-preview-scroll]::-webkit-scrollbar-thumb {
     border-radius: 6px;
     background-color: color-mix(in srgb, currentColor 22%, transparent);
   }
-  [data-testid="markdown-data-table"]::-webkit-scrollbar-thumb:hover {
+  [data-testid="markdown-data-table"]::-webkit-scrollbar-thumb:hover,
+  [data-file-preview-scroll]::-webkit-scrollbar-thumb:hover {
     background-color: color-mix(in srgb, currentColor 34%, transparent);
   }
-  [data-testid="markdown-data-table"]::-webkit-scrollbar-track {
+  [data-testid="markdown-data-table"]::-webkit-scrollbar-track,
+  [data-file-preview-scroll]::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  /* File preview panel content scroll area: same always-visible scrollbar so
+     long documents in the preview never look clipped on macOS (overlay
+     scrollbars hide until the user actively scrolls). */
+  [data-file-preview-scroll] {
+    scrollbar-width: thin; /* Firefox */
+  }
+  [data-file-preview-scroll]::-webkit-scrollbar {
+    -webkit-appearance: none;
+    height: 10px;
+    width: 10px;
+  }
+  [data-file-preview-scroll]::-webkit-scrollbar-thumb {
+    border-radius: 6px;
+    background-color: color-mix(in srgb, currentColor 22%, transparent);
+  }
+  [data-file-preview-scroll]::-webkit-scrollbar-thumb:hover {
+    background-color: color-mix(in srgb, currentColor 34%, transparent);
+  }
+  [data-file-preview-scroll]::-webkit-scrollbar-track {
     background: transparent;
   }
 

@@ -268,7 +268,7 @@ export function FilePreviewPanel({
             </div>
           ) : null}
 
-          <div className="min-h-0 flex-1 overflow-auto">
+          <div className="min-h-0 flex-1 overflow-auto" data-file-preview-scroll>
             {state.status === "loading" ? (
               <div className="flex h-full items-center justify-center gap-2 text-sm text-muted-foreground">
                 <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
