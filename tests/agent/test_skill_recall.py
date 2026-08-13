@@ -217,3 +217,70 @@ def test_cjk_trigger_allows_inserted_modifiers_without_generic_bigrams(
     result = loader.recall_skill_candidates("帮我提取这张图片里的文字")
     assert result.bound == ("image-ocr",)
     assert result.reason == "high_confidence"
+
+
+def test_auto_bind_triggers_require_an_action_phrase(loader: SkillsLoader, tmp_path: Path) -> None:
+    """A Skill name may remain a candidate without becoming an auto command."""
+    _write_skill(
+        tmp_path / "ws" / "skills",
+        "my",
+        metadata_json={
+            "description": "inspect runtime state and context window",
+            "triggers": ["上下文窗口"],
+            "autoBind": {"triggers": ["检查上下文窗口"]},
+        },
+    )
+    discussed = loader.recall_skill_candidates("一个 agent 的上下文窗口有限")
+    requested = loader.recall_skill_candidates("请检查当前上下文窗口")
+
+    assert discussed.candidates == ("my",)
+    assert discussed.bound == ()
+    assert discussed.reason == "weak_match"
+    assert requested.bound == ("my",)
+    assert requested.reason == "high_confidence"
+
+
+def test_auto_bind_media_requirement_fails_closed_without_media(
+    loader: SkillsLoader, tmp_path: Path
+) -> None:
+    """OCR-like workflows need both an action phrase and the current attachment."""
+    _write_skill(
+        tmp_path / "ws" / "skills",
+        "image-ocr",
+        metadata_json={
+            "description": "extract text from images",
+            "triggers": ["图片文字", "image-ocr"],
+            "autoBind": {
+                "triggers": ["提取图片文字"],
+                "requires": ["current_media"],
+            },
+        },
+    )
+
+    no_media = loader.recall_skill_candidates("请提取图片文字")
+    with_media = loader.recall_skill_candidates("请提取图片文字", has_current_media=True)
+    discussed = loader.recall_skill_candidates("讨论 image-ocr 如何自动发现")
+
+    assert no_media.candidates == ("image-ocr",)
+    assert no_media.bound == ()
+    assert no_media.reason == "missing_required_fact"
+    assert with_media.bound == ("image-ocr",)
+    assert with_media.reason == "high_confidence"
+    assert discussed.candidates == ("image-ocr",)
+    assert discussed.bound == ()
+    assert discussed.reason == "weak_match"
+
+
+def test_unknown_auto_bind_requirement_fails_closed(loader: SkillsLoader, tmp_path: Path) -> None:
+    _write_skill(
+        tmp_path / "ws" / "skills",
+        "guarded",
+        metadata_json={
+            "description": "guarded workflow",
+            "autoBind": {"triggers": ["运行 guarded"], "requires": ["unknown_fact"]},
+        },
+    )
+    result = loader.recall_skill_candidates("运行 guarded")
+    assert result.candidates == ("guarded",)
+    assert result.bound == ()
+    assert result.reason == "missing_required_fact"

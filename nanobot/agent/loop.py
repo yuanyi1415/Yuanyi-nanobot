@@ -51,6 +51,7 @@ from nanobot.bus.queue import MessageBus
 from nanobot.bus.runtime_events import RuntimeEventBus
 from nanobot.command import CommandContext, CommandRouter, register_builtin_commands
 from nanobot.config.schema import AgentDefaults, ModelPresetConfig
+from nanobot.cron.session_turns import cron_trigger
 from nanobot.providers.base import LLMProvider, ProviderConversationState
 from nanobot.providers.factory import ProviderSnapshot
 from nanobot.runtime_context import (
@@ -85,6 +86,7 @@ from nanobot.session.model_selection import (
     SESSION_MODEL_PRESET_METADATA_KEY,
     model_preset_from_metadata,
 )
+from nanobot.triggers.local_session_turns import local_trigger
 from nanobot.triggers.local_turns import LocalTriggerTurnCoordinator
 from nanobot.utils.cancellation import task_is_cancelling
 from nanobot.utils.document import reference_non_image_attachments
@@ -137,6 +139,7 @@ class SkillLaneDecision:
     reason: str = "none"
     bound_token_estimate: int = 0
     recall_elapsed_ms: float = 0.0
+    source: str = "user"
 
 
 @dataclass
@@ -808,16 +811,23 @@ class AgentLoop:
         Explicit ``$skill`` references always win; auto recall excludes them
         and appends only high-confidence bindings (FR-3/FR-4).
         """
-        if ctx.kind is not TurnKind.USER:
-            return SkillLaneDecision(lane="other")
-        text = ctx.msg.content if isinstance(ctx.msg.content, str) else ""
+        text = ctx.msg.content
         explicit = tuple(self.context.skills.get_explicitly_invoked_skills(text))
+        source = self._skill_recall_source(ctx)
+        if source != "user":
+            return SkillLaneDecision(
+                lane="skill" if explicit else "other",
+                explicit=explicit,
+                reason="non_user_source",
+                source=source,
+            )
         recall_started = time.perf_counter()
         recall = self.context.skills.recall_skill_candidates(
             text,
             exclude=explicit,
             max_count=self.skill_auto_bind_max_count,
             token_budget=self.skill_auto_bind_token_budget,
+            has_current_media=bool(ctx.msg.media),
         )
         recall_elapsed_ms = (time.perf_counter() - recall_started) * 1000
         lane = "skill" if (explicit or recall.bound) else "fast"
@@ -829,7 +839,19 @@ class AgentLoop:
             reason=recall.reason,
             bound_token_estimate=recall.bound_token_estimate,
             recall_elapsed_ms=recall_elapsed_ms,
+            source=source,
         )
+
+    @staticmethod
+    def _skill_recall_source(ctx: TurnContext) -> str:
+        """Classify the existing message origin for Skill auto-recall only."""
+        if ctx.kind is not TurnKind.USER:
+            return "system"
+        if local_trigger(ctx.msg.metadata) is not None:
+            return "local_trigger"
+        if cron_trigger(ctx.msg.metadata) is not None:
+            return "cron"
+        return "user"
 
     def _observe_lane(self, ctx: TurnContext, decision: SkillLaneDecision) -> None:
         """Write the FR-1 observability log line (loguru, channel=observability).
@@ -844,6 +866,7 @@ class AgentLoop:
             turn=ctx.turn_id,
             session=ctx.session_key,
             kind=ctx.kind.name,
+            source=decision.source,
             explicit=decision.explicit,
             candidates=decision.candidates,
             bound=decision.bound,
@@ -851,11 +874,12 @@ class AgentLoop:
             recall_elapsed_ms=decision.recall_elapsed_ms,
             reason=decision.reason,
         ).info(
-            "skill_lane event=decision lane={} turn={} session={} kind={} explicit={} candidates={} bound={} bound_token_estimate={} recall_elapsed_ms={:.3f} reason={}",
+            "skill_lane event=decision lane={} turn={} session={} kind={} source={} explicit={} candidates={} bound={} bound_token_estimate={} recall_elapsed_ms={:.3f} reason={}",
             decision.lane,
             ctx.turn_id,
             ctx.session_key,
             ctx.kind.name,
+            decision.source,
             ",".join(decision.explicit),
             ",".join(decision.candidates),
             ",".join(decision.bound),

@@ -20,6 +20,8 @@ from nanobot.agent.skills import SkillsLoader
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import Config
+from nanobot.cron.session_turns import CRON_TRIGGER_META
+from nanobot.triggers.local_session_turns import LOCAL_TRIGGER_META
 
 
 def _write_skill(
@@ -57,8 +59,22 @@ def _make_loop(tmp_path: Path, **kwargs: object) -> AgentLoop:
     return loop
 
 
-def _user_turn(loop: AgentLoop, content: str, *, kind: TurnKind = TurnKind.USER) -> TurnContext:
-    msg = InboundMessage(channel="cli", sender_id="user", chat_id="c1", content=content)
+def _user_turn(
+    loop: AgentLoop,
+    content: str,
+    *,
+    kind: TurnKind = TurnKind.USER,
+    media: list[str] | None = None,
+    metadata: dict[str, object] | None = None,
+) -> TurnContext:
+    msg = InboundMessage(
+        channel="cli",
+        sender_id="user",
+        chat_id="c1",
+        content=content,
+        media=media or [],
+        metadata=metadata or {},
+    )
     return TurnContext(
         msg=msg,
         session_key="cli:c1",
@@ -221,6 +237,126 @@ def test_observe_lane_system_turn_is_other(tmp_path: Path) -> None:
     )
     assert decision.lane == "other"
     assert decision.candidates == ()
+    assert decision.source == "system"
+
+
+def test_local_trigger_never_runs_auto_recall(tmp_path: Path) -> None:
+    (tmp_path / "skills").mkdir(parents=True)
+    _write_skill(tmp_path / "skills", "plan", metadata_json={"description": "planning"})
+    loop = _make_loop(tmp_path, observe_lane=True, skill_auto_bind=True)
+
+    def _explode(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("local triggers must not run automatic skill recall")
+
+    loop.context.skills.recall_skill_candidates = _explode  # type: ignore[method-assign]
+    decision = loop._decide_skill_lane(
+        _user_turn(
+            loop,
+            "inspect the plan after this notification",
+            metadata={
+                LOCAL_TRIGGER_META: {
+                    "trigger_id": "trigger-1",
+                    "delivery_id": "delivery-1",
+                }
+            },
+        )
+    )
+
+    assert decision.lane == "other"
+    assert decision.source == "local_trigger"
+    assert decision.reason == "non_user_source"
+    assert decision.candidates == ()
+    assert decision.bound == ()
+
+
+def test_cron_turn_never_runs_auto_recall(tmp_path: Path) -> None:
+    loop = _make_loop(tmp_path, observe_lane=True)
+
+    def _explode(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("cron turns must not run automatic skill recall")
+
+    loop.context.skills.recall_skill_candidates = _explode  # type: ignore[method-assign]
+    decision = loop._decide_skill_lane(
+        _user_turn(
+            loop,
+            "write the weekly plan",
+            metadata={
+                CRON_TRIGGER_META: {
+                    "job_id": "job-1",
+                    "run_id": "run-1",
+                }
+            },
+        )
+    )
+
+    assert decision.lane == "other"
+    assert decision.source == "cron"
+    assert decision.reason == "non_user_source"
+
+
+def test_local_trigger_retains_explicit_skill(tmp_path: Path) -> None:
+    (tmp_path / "skills").mkdir(parents=True)
+    _write_skill(tmp_path / "skills", "plan", metadata_json={"description": "planning"})
+    loop = _make_loop(tmp_path, observe_lane=True, skill_auto_bind=True)
+    decision = loop._decide_skill_lane(
+        _user_turn(
+            loop,
+            "use $plan for this notification",
+            metadata={
+                LOCAL_TRIGGER_META: {
+                    "trigger_id": "trigger-1",
+                    "delivery_id": "delivery-1",
+                }
+            },
+        )
+    )
+
+    assert decision.lane == "skill"
+    assert decision.source == "local_trigger"
+    assert decision.explicit == ("plan",)
+    assert decision.reason == "non_user_source"
+
+    messages = loop._build_initial_messages(
+        _with_session(
+            _user_turn(
+                loop,
+                "use $plan for this notification",
+                metadata={
+                    LOCAL_TRIGGER_META: {
+                        "trigger_id": "trigger-2",
+                        "delivery_id": "delivery-2",
+                    }
+                },
+            )
+        )
+    )
+    assert "### Skill: plan" in messages[0]["content"]
+
+
+def test_media_required_auto_bind_is_forwarded_from_turn(tmp_path: Path) -> None:
+    (tmp_path / "skills").mkdir(parents=True)
+    _write_skill(
+        tmp_path / "skills",
+        "image-ocr",
+        metadata_json={
+            "description": "extract text from images",
+            "triggers": ["图片文字"],
+            "autoBind": {
+                "triggers": ["提取图片文字"],
+                "requires": ["current_media"],
+            },
+        },
+    )
+    loop = _make_loop(tmp_path, observe_lane=True, skill_auto_bind=True)
+
+    without_media = loop._decide_skill_lane(_user_turn(loop, "请提取图片文字"))
+    with_media = loop._decide_skill_lane(
+        _user_turn(loop, "请提取图片文字", media=["/tmp/image.png"])
+    )
+
+    assert without_media.bound == ()
+    assert without_media.reason == "missing_required_fact"
+    assert with_media.bound == ("image-ocr",)
 
 
 def test_observe_lane_explicit_skill_is_skill_lane(tmp_path: Path) -> None:

@@ -44,7 +44,8 @@ def _normalize_str_list(value: object) -> tuple[str, ...]:
             return tuple(str(item).strip() for item in parsed if str(item).strip())
         return (raw,)
     if isinstance(value, list):
-        return tuple(str(item).strip() for item in value if str(item).strip())
+        items = cast(list[object], value)
+        return tuple(str(item).strip() for item in items if str(item).strip())
     return ()
 
 
@@ -85,6 +86,8 @@ class SkillDescriptor:
         activation: "auto" | "manual" | "always" | "disabled".
         tags: Optional frontmatter tags that improve recall.
         triggers: Optional frontmatter triggers that improve recall.
+        auto_bind_triggers: Optional action phrases eligible for auto-binding.
+        auto_bind_requires: Objective facts required before auto-binding.
         content_fingerprint: Short hash of the SKILL.md body.
         missing_requirements: Human-readable unmet requirements, when any.
     """
@@ -97,6 +100,8 @@ class SkillDescriptor:
     missing_requirements: str = ""
     tags: tuple[str, ...] = ()
     triggers: tuple[str, ...] = ()
+    auto_bind_triggers: tuple[str, ...] = ()
+    auto_bind_requires: tuple[str, ...] = ()
     content_fingerprint: str = ""
 
 
@@ -107,7 +112,9 @@ class SkillRecallResult:
     Attributes:
         candidates: Matching candidate names, best score first.
         bound: Names actually bound (subject to budget); subset of candidates.
-        reason: "none" | "high_confidence" | "ambiguous_multi_candidate" | "budget_limited".
+        reason: "none" | "weak_match" | "high_confidence" |
+            "ambiguous_multi_candidate" | "budget_limited" |
+            "missing_required_fact".
     """
 
     candidates: tuple[str, ...] = ()
@@ -468,6 +475,8 @@ class SkillsLoader:
             triggers = _normalize_str_list(
                 nanobot_meta.get("triggers", meta.get("triggers"))
             )
+            auto_bind = nanobot_meta.get("autoBind")
+            auto_bind_meta = cast(dict[str, object], auto_bind) if isinstance(auto_bind, dict) else {}
             descriptors.append(
                 SkillDescriptor(
                     name=name,
@@ -478,6 +487,8 @@ class SkillsLoader:
                     missing_requirements=missing,
                     tags=tags,
                     triggers=triggers,
+                    auto_bind_triggers=_normalize_str_list(auto_bind_meta.get("triggers")),
+                    auto_bind_requires=_normalize_str_list(auto_bind_meta.get("requires")),
                     content_fingerprint=self._content_fingerprint(name),
                 )
             )
@@ -516,16 +527,18 @@ class SkillsLoader:
         exclude: Sequence[str] = (),
         max_count: int = 2,
         token_budget: int = 2000,
+        has_current_media: bool = False,
     ) -> SkillRecallResult:
         """Deterministic local skill recall for the skill-guidance lane (FR-3).
 
         Term-overlap matching against each candidate skill's name, description,
         tags and triggers. Description-only matches remain observable candidates,
-        but automatic binding requires one unique strong phrase hit from the
-        skill name, tags or triggers. This keeps generic prose from injecting an
-        unrelated workflow. Skills that are unavailable, ``disabled``,
-        ``manual`` or ``always`` are excluded, as are names in *exclude*
-        (explicit ``$skill`` references).
+        but automatic binding requires one unique strong phrase hit and any
+        declared objective facts. A skill can provide ``autoBind.triggers`` to
+        use action phrases instead of its name/tags/triggers as strong signals,
+        and ``autoBind.requires: [current_media]`` to require an attachment.
+        Skills that are unavailable, ``disabled``, ``manual`` or ``always`` are
+        excluded, as are names in *exclude* (explicit ``$skill`` references).
         """
         if not text:
             return SkillRecallResult()
@@ -534,7 +547,7 @@ class SkillsLoader:
             return SkillRecallResult()
         excluded = set(exclude or ())
         normalized_text = _SKILL_PHRASE_RE.sub("", text.lower())
-        scored: list[tuple[int, int, str]] = []
+        scored: list[tuple[int, int, bool, str]] = []
         for descriptor in self.list_skill_descriptors():
             if descriptor.activation != "auto" or not descriptor.availability:
                 continue
@@ -543,25 +556,32 @@ class SkillsLoader:
             score = self._match_score(query_tokens, descriptor)
             if score > 0:
                 strong_score = self._strong_match_score(normalized_text, query_tokens, descriptor)
-                scored.append((score, strong_score, descriptor.name))
+                requirements_met = self._auto_bind_requirements_met(
+                    descriptor,
+                    has_current_media=has_current_media,
+                )
+                scored.append((score, strong_score, requirements_met, descriptor.name))
         if not scored:
             return SkillRecallResult()
-        scored.sort(key=lambda item: (-item[0], item[2]))
-        candidates = tuple(name for _, _, name in scored)
+        scored.sort(key=lambda item: (-item[0], item[3]))
+        candidates = tuple(name for _, _, _, name in scored)
         strong_candidates = [candidate for candidate in scored if candidate[1] > 0]
         if not strong_candidates:
             return SkillRecallResult(candidates=candidates, reason="weak_match")
+        eligible_strong_candidates = [candidate for candidate in strong_candidates if candidate[2]]
+        if not eligible_strong_candidates:
+            return SkillRecallResult(candidates=candidates, reason="missing_required_fact")
         # Different explicit activation phrases are an ambiguity, regardless
         # of their spelling length. Choosing ``github`` over ``git`` merely
         # because one name has more characters would be false confidence.
-        if len(strong_candidates) > 1:
+        if len(eligible_strong_candidates) > 1:
             return SkillRecallResult(candidates=candidates, reason="ambiguous_multi_candidate")
-        top = strong_candidates[0]
+        top = eligible_strong_candidates[0]
         # Automatic loading is deliberately a single-workflow action. The
         # existing max_count setting remains a compatible ceiling, while a
         # low-ranked candidate can never be added merely to fill that budget.
         bound, bound_token_estimate = self._bind_with_budget(
-            [top], max_count=max_count, token_budget=token_budget
+            [(top[0], top[1], top[3])], max_count=max_count, token_budget=token_budget
         )
         if not bound:
             return SkillRecallResult(candidates=candidates, reason="budget_limited")
@@ -590,7 +610,12 @@ class SkillsLoader:
         normalized_text: str, query_tokens: set[str], descriptor: SkillDescriptor
     ) -> int:
         """Score exact activation phrases; generic token overlap is not a bind signal."""
-        phrases = (descriptor.name, *descriptor.tags, *descriptor.triggers)
+        phrases = descriptor.auto_bind_triggers or (
+            descriptor.name,
+            *descriptor.tags,
+            *descriptor.triggers,
+        )
+        uses_declared_auto_bind_triggers = bool(descriptor.auto_bind_triggers)
         strongest = 0
         for phrase in phrases:
             normalized_phrase = _SKILL_PHRASE_RE.sub("", phrase.lower())
@@ -616,9 +641,35 @@ class SkillsLoader:
                     if len(token) == 2 and _CJK_TOKEN_RE.fullmatch(token)
                 }
                 shared_bigrams = phrase_bigrams & query_tokens
-                if len(shared_bigrams) >= 2:
+                first_bigram = normalized_phrase[:2]
+                # A declared auto-binding phrase is an action contract. Its
+                # action prefix must appear before accepting fuzzy CJK wording;
+                # otherwise a passive topic such as "上下文窗口" would activate
+                # the declared action "检查上下文窗口".
+                has_action_prefix = first_bigram in query_tokens
+                if len(shared_bigrams) >= 2 and (
+                    not uses_declared_auto_bind_triggers or has_action_prefix
+                ):
                     strongest = max(strongest, 20 + len(shared_bigrams))
         return strongest
+
+    @staticmethod
+    def _auto_bind_requirements_met(
+        descriptor: SkillDescriptor,
+        *,
+        has_current_media: bool,
+    ) -> bool:
+        """Return whether declared auto-binding facts are true for this turn.
+
+        Unknown requirements deliberately fail closed. They are user-authored
+        safety constraints, so a typo may suppress auto-loading but must never
+        make a workflow easier to inject.
+        """
+        for requirement in descriptor.auto_bind_requires:
+            if requirement == "current_media" and has_current_media:
+                continue
+            return False
+        return True
 
     def _bind_with_budget(
         self,

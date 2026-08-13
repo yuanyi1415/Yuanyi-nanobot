@@ -2,6 +2,10 @@
 name: my
 description: Inspect and optionally adjust the agent's runtime state. Use to check the current model or preset, context window, iteration progress and limits, token usage, workspace and tool configuration, subagent status, and request routing metadata such as channel, chat ID, and sender ID; diagnose unavailable capabilities; change allowed runtime settings; or store temporary session scratchpad values.
 triggers: [当前模型, token用量, 上下文窗口, 运行时状态, 检查配置]
+metadata:
+  nanobot:
+    autoBind:
+      triggers: [查看当前模型, 查询token用量, 检查上下文窗口, 查看运行时状态, 检查当前配置]
 ---
 
 # Self-Awareness
