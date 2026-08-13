@@ -9,18 +9,6 @@ import {
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
-export type FileReferenceKind =
-  | "default"
-  | "css"
-  | "html"
-  | "javascript"
-  | "json"
-  | "markdown"
-  | "notebook"
-  | "python"
-  | "react"
-  | "typescript";
-
 interface FileReferenceChipProps {
   path: string;
   tooltipPath?: string;
@@ -48,7 +36,6 @@ export function FileReferenceChip({
 }: FileReferenceChipProps) {
   const { t } = useTranslation();
   const { directory, name } = splitFilePath(path);
-  const kind = fileKindForPath(path);
   const displayText = display === "path" ? path.replace(/\\/g, "/") : name;
   const fullPath = tooltipPath || path;
   const targetPath = previewPath || tooltipPath || path;
@@ -85,22 +72,17 @@ export function FileReferenceChip({
               className={cn(
                 "inline-flex max-w-full items-baseline gap-[0.22em] font-[550] leading-[inherit]",
                 "rounded-[3px] px-px text-[#2563eb] dark:text-[#7ab7ff]",
-                "transition-[color,background-color] duration-[120ms]",
-                "hover:text-[#1d4ed8] hover:bg-[rgba(37,99,235,0.10)]",
-                "dark:hover:text-[#9cc6ff] dark:hover:bg-[rgba(122,183,255,0.12)]",
                 interactive && [
                   "cursor-pointer",
                   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(37,99,235,0.45)]",
                   "dark:focus-visible:ring-[rgba(122,183,255,0.5)]",
                 ],
                 unavailable && [
-                  "cursor-not-allowed text-muted-foreground/65",
-                  "dark:text-muted-foreground/65",
-                  "hover:bg-transparent hover:text-muted-foreground/65 dark:hover:bg-transparent",
+                  "cursor-not-allowed text-muted-foreground/65 dark:text-muted-foreground/65",
                 ],
               )}
             >
-              <FileReferenceIcon kind={kind} />
+              <FileReferenceIcon />
               <span
                 data-sheen-text={active ? displayText : undefined}
                 className={cn(
@@ -168,184 +150,22 @@ export function splitFilePath(path: string): { directory: string; name: string }
   };
 }
 
-export function fileKindForPath(path: string): FileReferenceKind {
-  const normalized = path.toLowerCase();
-  const name = normalized.split(/[\\/]/).pop() ?? normalized;
-  const ext = name.includes(".") ? name.split(".").pop() ?? "" : "";
-  if (name === "dockerfile") {
-    return "default";
-  }
-  switch (ext) {
-    case "py":
-    case "pyi":
-      return "python";
-    case "jsx":
-    case "tsx":
-      return "react";
-    case "js":
-    case "mjs":
-    case "cjs":
-      return "javascript";
-    case "ts":
-    case "mts":
-    case "cts":
-      return "typescript";
-    case "html":
-    case "htm":
-      return "html";
-    case "css":
-    case "scss":
-    case "sass":
-      return "css";
-    case "json":
-    case "jsonl":
-      return "json";
-    case "md":
-    case "mdx":
-      return "markdown";
-    case "ipynb":
-      return "notebook";
-    default:
-      return "default";
-  }
-}
-
-export function FileReferenceIcon({ kind }: { kind: FileReferenceKind }) {
-  if (kind === "python") {
-    return (
-      <svg
-        aria-hidden
-        className="h-[0.95em] w-[0.95em] shrink-0 translate-y-[0.12em]"
-        viewBox="0 0 24 24"
-      >
-        <path
-          d="M11.9 2.3c-3 0-4.5.8-4.5 2.3v2.1h4.8v.8H5.5C4 7.5 3 8.8 3 10.8v2.1c0 1.8 1.1 3 2.7 3h1.6v-2.3c0-1.7 1.4-3.1 3.1-3.1h4.2c1.3 0 2.3-1 2.3-2.3V4.6c0-1.4-1.5-2.3-4.6-2.3h-.4Z"
-          fill="#3776AB"
-        />
-        <path
-          d="M12.1 21.7c3 0 4.5-.8 4.5-2.3v-2.1h-4.8v-.8h6.7c1.5 0 2.5-1.3 2.5-3.3v-2.1c0-1.8-1.1-3-2.7-3h-1.6v2.3c0 1.7-1.4 3.1-3.1 3.1H9.4c-1.3 0-2.3 1-2.3 2.3v3.6c0 1.4 1.5 2.3 4.6 2.3h.4Z"
-          fill="#FFD43B"
-        />
-        <circle cx="9" cy="5.1" r="0.8" fill="#fff" />
-        <circle cx="15" cy="18.9" r="0.8" fill="#5C3B00" opacity="0.85" />
-      </svg>
-    );
-  }
-  if (kind === "react") {
-    return (
-      <svg
-        aria-hidden
-        className="h-[0.95em] w-[0.95em] shrink-0 translate-y-[0.11em] text-[#3178c6]"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.6"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      >
-        <circle cx="12" cy="12" r="1.9" fill="currentColor" stroke="none" />
-        <ellipse cx="12" cy="12" rx="9" ry="3.7" />
-        <ellipse cx="12" cy="12" rx="9" ry="3.7" transform="rotate(60 12 12)" />
-        <ellipse cx="12" cy="12" rx="9" ry="3.7" transform="rotate(120 12 12)" />
-      </svg>
-    );
-  }
-  if (kind === "default") {
-    return (
-      <svg
-        aria-hidden
-        className="h-[0.95em] w-[0.95em] shrink-0 translate-y-[0.11em] text-muted-foreground/80"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.9"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      >
-        <path d="M14 2H7a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7z" />
-        <path d="M14 2v5h5" />
-      </svg>
-    );
-  }
-  const colorClass = fileKindColorClass(kind);
-  const label = fileKindLabel(kind);
+export function FileReferenceIcon() {
   return (
     <svg
       aria-hidden
-      className={cn(
-        "h-[0.95em] w-[0.95em] shrink-0 translate-y-[0.12em]",
-        colorClass,
-      )}
-      viewBox="0 0 24 24"
+      className="h-[0.95em] w-[0.95em] shrink-0 translate-y-[0.12em]"
+      viewBox="0 0 1024 1024"
       fill="none"
     >
       <path
-        d="M7 3.5h6.6L18 7.9V19a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 6 19V5a1.5 1.5 0 0 1 1.5-1.5Z"
-        fill="currentColor"
-        opacity="0.12"
+        d="M684.8 874.666667H241.066667c-44.8 0-81.066667-36.266667-81.066667-81.066667V230.4C160 185.6 196.266667 149.333333 241.066667 149.333333H499.2c14.933333 0 32 4.266667 44.8 12.8l185.6 123.733334c23.466667 14.933333 36.266667 40.533333 36.266667 66.133333v439.466667c-2.133333 46.933333-38.4 83.2-81.066667 83.2z"
+        fill="#2953FF"
       />
       <path
-        d="M13.5 3.75V8h4.25M7 3.5h6.6L18 7.9V19a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 6 19V5a1.5 1.5 0 0 1 1.5-1.5Z"
-        stroke="currentColor"
-        strokeWidth="1.75"
-        strokeLinecap="round"
-        strokeLinejoin="round"
+        d="M778.666667 695.466667H465.066667c-46.933333 0-85.333333-38.4-85.333334-85.333334v-110.933333c0-46.933333 38.4-85.333333 85.333334-85.333333h313.6c46.933333 0 85.333333 38.4 85.333333 85.333333v110.933333c0 46.933333-38.4 85.333333-85.333333 85.333334z"
+        fill="#FCCA1E"
       />
-      <text
-        x="12"
-        y="15.7"
-        textAnchor="middle"
-        fill="currentColor"
-        fontSize={label.length > 1 ? "5.8" : "7.2"}
-        fontWeight="800"
-        letterSpacing="-0.2"
-      >
-        {label}
-      </text>
     </svg>
   );
-}
-
-function fileKindColorClass(kind: FileReferenceKind): string {
-  switch (kind) {
-    case "css":
-      return "text-[#663399]";
-    case "html":
-      return "text-[#e34c26]";
-    case "javascript":
-      return "text-[#f1e05a]";
-    case "json":
-      return "text-[#292929] dark:text-[#8b949e]";
-    case "markdown":
-      return "text-[#519aba]";
-    case "notebook":
-      return "text-[#da5b0b] dark:text-[#f0893f]";
-    case "typescript":
-      return "text-[#3178c6]";
-    default:
-      return "text-muted-foreground/80";
-  }
-}
-
-function fileKindLabel(kind: FileReferenceKind): string {
-  switch (kind) {
-    case "css":
-      return "#";
-    case "html":
-      return "H";
-    case "javascript":
-      return "JS";
-    case "json":
-      return "{}";
-    case "markdown":
-      return "M";
-    case "notebook":
-      return "N";
-    case "python":
-      return "PY";
-    case "typescript":
-      return "TS";
-    default:
-      return "";
-  }
 }
