@@ -87,7 +87,7 @@ export function ThreadMessages({
         const prev = units[index - 1];
         const marginTop =
           index > 0
-            ? marginAfterPrevUnit(prev)
+            ? marginAfterPrevUnit(prev, unit)
             : "";
         const next = units[index + 1];
         const hasBodyBelow =
@@ -341,9 +341,17 @@ function stableTurnMessageKey(message: UIMessage | undefined, fallbackPhase?: st
   return `turn-${message.turnId}-${phase}`;
 }
 
-function marginAfterPrevUnit(prev: DisplayUnit): string {
+function marginAfterPrevUnit(prev: DisplayUnit, cur: DisplayUnit): string {
+  // Draw the divider only above an assistant reply that has visible body
+  // content — user messages and pure-reasoning messages stay clean.
+  const divider =
+    cur.type === "message"
+    && cur.message.role === "assistant"
+    && cur.message.content.trim().length > 0
+      ? " border-t border-border/85 pt-3"
+      : "";
   if (prev.type === "activity") {
-    return "mt-4";
+    return "mt-4" + divider;
   }
   const p = prev.message;
   const denseP =
@@ -354,7 +362,7 @@ function marginAfterPrevUnit(prev: DisplayUnit): string {
       && (!!p.reasoning || !!p.reasoningStreaming)
     );
   if (denseP) {
-    return "mt-2";
+    return "mt-2" + divider;
   }
-  return "mt-5";
+  return "mt-5" + divider;
 }
