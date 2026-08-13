@@ -90,6 +90,9 @@ describe("FilePreviewPanel", () => {
 
     const closeButton = screen.getByRole("button", { name: "Close file preview" });
     expect(closeButton).toBeVisible();
+    // The close button sits inside the desktop host drag region (top 44px);
+    // without `host-no-drag` the click is swallowed as a window drag.
+    expect(closeButton).toHaveClass("host-no-drag");
 
     await user.click(closeButton);
     expect(onClose).toHaveBeenCalledTimes(1);

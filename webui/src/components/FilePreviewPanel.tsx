@@ -129,6 +129,7 @@ export function FilePreviewPanel({
             className={cn(
               "group absolute inset-y-0 left-0 z-20 hidden w-3 -translate-x-1/2 cursor-col-resize touch-none md:flex",
               "items-stretch justify-center focus-visible:outline-none",
+              "host-no-drag",
             )}
             onPointerDown={onResizeStart}
           >
@@ -204,6 +205,7 @@ export function FilePreviewPanel({
                 "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md",
                 "text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
                 "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                "host-no-drag",
               )}
               title={t("filePreview.close", { defaultValue: "Close file preview" })}
               aria-label={t("filePreview.close", { defaultValue: "Close file preview" })}
