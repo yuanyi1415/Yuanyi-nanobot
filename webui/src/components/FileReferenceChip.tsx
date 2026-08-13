@@ -85,10 +85,8 @@ export function FileReferenceChip({
               className={cn(
                 "inline-flex max-w-full items-baseline gap-[0.22em] font-[550] leading-[inherit]",
                 "rounded-[3px] px-px text-[#2563eb] dark:text-[#7ab7ff]",
-                "underline decoration-[rgba(37,99,235,0.45)] decoration-[1.5px] underline-offset-[2.5px]",
-                "dark:decoration-[rgba(122,183,255,0.5)]",
-                "transition-[color,background-color,text-decoration-color] duration-[120ms]",
-                "hover:text-[#1d4ed8] hover:bg-[rgba(37,99,235,0.10)] hover:decoration-current",
+                "transition-[color,background-color] duration-[120ms]",
+                "hover:text-[#1d4ed8] hover:bg-[rgba(37,99,235,0.10)]",
                 "dark:hover:text-[#9cc6ff] dark:hover:bg-[rgba(122,183,255,0.12)]",
                 interactive && [
                   "cursor-pointer",
@@ -96,10 +94,9 @@ export function FileReferenceChip({
                   "dark:focus-visible:ring-[rgba(122,183,255,0.5)]",
                 ],
                 unavailable && [
-                  "cursor-not-allowed text-muted-foreground/65 decoration-dashed decoration-muted-foreground/45",
+                  "cursor-not-allowed text-muted-foreground/65",
                   "dark:text-muted-foreground/65",
                   "hover:bg-transparent hover:text-muted-foreground/65 dark:hover:bg-transparent",
-                  "hover:decoration-muted-foreground/45",
                 ],
               )}
             >
