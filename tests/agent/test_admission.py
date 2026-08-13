@@ -14,12 +14,27 @@ from nanobot.config.schema import Config
 from nanobot.providers.base import LLMResponse, ProviderConversationState
 
 
-def _task_frames(*frames: tuple[str, str]) -> dict[str, object]:
+def _task_frames(*frames: tuple[str, str, str]) -> dict[str, object]:
     return {
         "orchestration.v1": {
+            "schema_version": 1,
             "task_frames": [
-                {"id": task_id, "goal": goal, "status": "ready"}
-                for task_id, goal in frames
+                {
+                    "id": task_id,
+                    "revision": 1,
+                    "goal": goal,
+                    "status": status,
+                    "scope": [],
+                    "constraints": [],
+                    "acceptance": [],
+                    "origin": {"turn_id": "turn-1", "evidence": ["current_turn"]},
+                    "created_at": "2026-08-13T00:00:00+00:00",
+                    "updated_at": "2026-08-13T00:00:00+00:00",
+                    "active_plan": None,
+                    "pending_result_ids": [],
+                    "terminal": None,
+                }
+                for task_id, goal, status in frames
             ]
         }
     }
@@ -32,7 +47,7 @@ def test_non_continuation_keeps_existing_path() -> None:
 
 
 def test_single_task_frame_admits_and_adds_current_turn_context() -> None:
-    decision = assess_admission("继续", _task_frames(("task-1", "整理调研结论")))
+    decision = assess_admission("继续", _task_frames(("task-1", "整理调研结论", "ready")))
     assert decision.action == "continue"
     assert decision.reason == "single_task_frame"
     assert decision.anchor is not None
@@ -56,7 +71,7 @@ def test_active_sustained_goal_is_an_unambiguous_continuation_anchor() -> None:
 def test_multiple_task_frames_require_selection() -> None:
     decision = assess_admission(
         "按这个办",
-        _task_frames(("task-1", "准备方案"), ("task-2", "运行回归")),
+        _task_frames(("task-1", "准备方案", "running"), ("task-2", "运行回归", "waiting_results")),
     )
     assert decision.action == "clarify"
     assert decision.reason == "multiple_task_frames"
@@ -68,6 +83,13 @@ def test_multiple_task_frames_require_selection() -> None:
 
 def test_continuation_without_anchor_requires_clarification() -> None:
     decision = assess_admission("继续", {})
+    assert decision.action == "clarify"
+    assert decision.reason == "no_task_anchor"
+
+
+@pytest.mark.parametrize("status", ["blocked", "active"])
+def test_blocked_or_legacy_active_task_frames_are_not_continuation_anchors(status: str) -> None:
+    decision = assess_admission("继续", _task_frames(("task-1", "等待用户输入", status)))
     assert decision.action == "clarify"
     assert decision.reason == "no_task_anchor"
 
@@ -168,7 +190,7 @@ async def test_single_anchor_reaches_runner_as_runtime_context(tmp_path) -> None
         admission_gate=True,
     )
     session = loop.sessions.get_or_create("cli:c1")
-    session.metadata.update(_task_frames(("task-1", "整理调研结论")))
+    session.metadata.update(_task_frames(("task-1", "整理调研结论", "ready")))
 
     result = await loop._process_message(InboundMessage(
         channel="cli", sender_id="user", chat_id="c1", content="继续"

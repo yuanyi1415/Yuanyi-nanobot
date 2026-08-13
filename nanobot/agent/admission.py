@@ -9,14 +9,15 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Any, Literal, Mapping, cast
+from typing import Any, Literal, Mapping
 
+from nanobot.agent.task_frames import (
+    CONTINUABLE_TASK_FRAME_STATUSES,
+    safe_task_frames_from_metadata,
+)
 from nanobot.runtime_context import RuntimeContextBlock, wrap_runtime_context_lines
 from nanobot.session.goal_state import goal_state_raw, parse_goal_state
 
-ORCHESTRATION_METADATA_KEY = "orchestration.v1"
-TASK_FRAMES_METADATA_KEY = "task_frames"
-_READY_STATUSES = frozenset({"ready", "active"})
 _CONTINUATION_RE = re.compile(
     r"^(?:好(?:的)?[，,。！!\s]*)?"
     r"(?:继续(?:吧|做|处理)?|按(?:这个|刚才|上述)(?:办|处理|执行)?|"
@@ -113,26 +114,11 @@ def _active_goal_anchor(metadata: Mapping[str, Any]) -> TaskAnchor | None:
 
 
 def _ready_task_anchors(metadata: Mapping[str, Any]) -> list[TaskAnchor]:
-    raw_namespace = cast(object, metadata.get(ORCHESTRATION_METADATA_KEY))
-    if not isinstance(raw_namespace, dict):
-        return []
-    namespace = cast(dict[str, Any], raw_namespace)
-    raw_frames = cast(object, namespace.get(TASK_FRAMES_METADATA_KEY))
-    if not isinstance(raw_frames, list):
-        return []
-
-    anchors: list[TaskAnchor] = []
-    for raw_frame in cast(list[object], raw_frames):
-        if not isinstance(raw_frame, dict):
-            continue
-        frame = cast(dict[str, Any], raw_frame)
-        if str(frame.get("status") or "").strip().lower() not in _READY_STATUSES:
-            continue
-        task_id = str(frame.get("id") or "").strip()
-        goal = str(frame.get("goal") or "").strip()
-        if task_id and goal:
-            anchors.append(TaskAnchor(task_id=task_id, goal=goal))
-    return anchors
+    return [
+        TaskAnchor(task_id=frame.id, goal=frame.goal)
+        for frame in safe_task_frames_from_metadata(metadata)
+        if frame.status in CONTINUABLE_TASK_FRAME_STATUSES
+    ]
 
 
 def _multiple_anchor_question(anchors: list[TaskAnchor]) -> str:
