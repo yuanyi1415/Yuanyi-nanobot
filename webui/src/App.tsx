@@ -1129,6 +1129,24 @@ function Shell({
     }
   }, [client]);
 
+  // P5: 防拖放导航。Electron 桌面壳中，把文件拖到窗口内非表单区域（消息
+  // 列表/空白处）默认会导航到 file:// 路径，整个 WebUI 被文件内容替换。
+  // 这里在 document 冒泡阶段拦截拖放（仅当拖入的是文件），阻止默认导航；
+  // 输入区的附件拖拽由 composer 的局部处理先 preventDefault 完成，不受影响。
+  useEffect(() => {
+    const guard = (event: DragEvent) => {
+      const types = event.dataTransfer?.types;
+      if (!types || !Array.from(types).includes("Files")) return;
+      event.preventDefault();
+    };
+    document.addEventListener("dragover", guard);
+    document.addEventListener("drop", guard);
+    return () => {
+      document.removeEventListener("dragover", guard);
+      document.removeEventListener("drop", guard);
+    };
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     fetchSettings(getToken())
