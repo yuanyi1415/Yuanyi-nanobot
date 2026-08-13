@@ -2210,8 +2210,23 @@ function Shell({
 
   useEffect(() => {
     document.documentElement.classList.toggle("native-host", showHostChrome);
+    if (!showHostChrome) return;
+    // Native host: reveal the (hidden-at-rest) custom scrollbar thumb while the
+    // user scrolls, fading it out shortly after scrolling stops. See the
+    // `native-scrolling` rules in globals.css.
+    let hideTimer: ReturnType<typeof setTimeout> | undefined;
+    const revealThumbs = () => {
+      document.documentElement.classList.add("native-scrolling");
+      if (hideTimer) clearTimeout(hideTimer);
+      hideTimer = setTimeout(() => {
+        document.documentElement.classList.remove("native-scrolling");
+      }, 400);
+    };
+    document.addEventListener("scroll", revealThumbs, true);
     return () => {
       document.documentElement.classList.remove("native-host");
+      document.removeEventListener("scroll", revealThumbs, true);
+      if (hideTimer) clearTimeout(hideTimer);
     };
   }, [showHostChrome]);
 
