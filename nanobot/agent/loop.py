@@ -22,6 +22,7 @@ from loguru import logger
 
 from nanobot.agent import context as agent_context
 from nanobot.agent import model_presets as preset_helpers
+from nanobot.agent.admission import assess_admission, runtime_context_for_anchor
 from nanobot.agent.autocompact import AutoCompact
 from nanobot.agent.automation_turns import publish_next_deferred_turn
 from nanobot.agent.context import ContextBuilder
@@ -153,6 +154,7 @@ class TurnContext:
     initial_messages: list[dict[str, Any]] = field(default_factory=list)
     provider_state: ProviderConversationState | None = field(default=None, repr=False)
     request_context: RequestContext | None = None
+    admission_runtime_context_blocks: list[RuntimeContextBlock] = field(default_factory=list)
     runtime_context_blocks: list[RuntimeContextBlock] = field(default_factory=list)
     attributes: dict[str, Any] = field(default_factory=dict)
 
@@ -325,6 +327,8 @@ class AgentLoop:
         skill_auto_bind: bool = False,
         skill_auto_bind_max_count: int = 2,
         skill_auto_bind_token_budget: int = 2000,
+        observe_admission: bool = False,
+        admission_gate: bool = False,
     ):
         from nanobot.config.schema import ToolsConfig
 
@@ -492,6 +496,8 @@ class AgentLoop:
         self.skill_auto_bind = skill_auto_bind
         self.skill_auto_bind_max_count = skill_auto_bind_max_count
         self.skill_auto_bind_token_budget = skill_auto_bind_token_budget
+        self.observe_admission = observe_admission
+        self.admission_gate = admission_gate
         if model_preset:
             self.set_model_preset(model_preset, publish_update=False)
         self._register_default_tools(provider_snapshot_loader=provider_snapshot_loader)
@@ -559,6 +565,8 @@ class AgentLoop:
             skill_auto_bind=defaults.experimental.skill_auto_bind,
             skill_auto_bind_max_count=defaults.experimental.skill_auto_bind_max_count,
             skill_auto_bind_token_budget=defaults.experimental.skill_auto_bind_token_budget,
+            observe_admission=defaults.experimental.observe_admission,
+            admission_gate=defaults.experimental.admission_gate,
             **extra,
         )
 
@@ -1688,6 +1696,8 @@ class AgentLoop:
         await self._run_turn_stage(ctx, "compact", self._compact_session)
         if await self._run_turn_stage(ctx, "command", self._dispatch_command):
             return ctx.outbound
+        if await self._run_turn_stage(ctx, "admission", self._admit_turn):
+            return ctx.outbound
         await self._run_turn_stage(ctx, "build", self._build_turn)
         await self._run_turn_stage(ctx, "run", self._run_turn)
         await self._run_turn_stage(ctx, "save", self._persist_turn)
@@ -1869,6 +1879,65 @@ class AgentLoop:
             return True
         return False
 
+    async def _admit_turn(self, ctx: TurnContext) -> bool:
+        """Gate only ambiguous continuation phrases before the normal Runner path."""
+        if (
+            ctx.kind is not TurnKind.USER
+            or not (self.observe_admission or self.admission_gate)
+        ):
+            return False
+
+        session = ctx.require_session()
+        decision = assess_admission(ctx.msg.content, session.metadata)
+        if self.observe_admission:
+            logger.bind(channel="observability").info(
+                "admission_gate action={} reason={} candidate_count={}",
+                decision.action,
+                decision.reason,
+                decision.candidate_count,
+            )
+        if not self.admission_gate or decision.action == "pass":
+            return False
+        if decision.action == "continue":
+            block = runtime_context_for_anchor(decision.anchor)
+            if block is not None:
+                ctx.admission_runtime_context_blocks.append(block)
+            return False
+
+        clarification = decision.clarification
+        if clarification is None:
+            raise RuntimeError("clarification decision is missing response content")
+        ctx.input_persisted_early = self._persist_user_message_early(ctx.msg, session)
+        session.add_message("assistant", clarification, _admission_clarification=True)
+        # This response was not sent to the provider, so a resumable provider
+        # state would otherwise replay an incompatible history on the next turn.
+        session.provider_state = None
+        self._clear_pending_user_turn(session)
+        ctx.final_content = clarification
+        ctx.stop_reason = "admission_clarify"
+        ctx.turn_latency_ms = max(0, int((time.time() - ctx.turn_wall_started_at) * 1000))
+        ctx.delivery.record_latency(ctx.turn_latency_ms)
+        self.sessions.save(session)
+        if not ctx.ephemeral:
+            await self.runtime_event_publisher.session_turn_persisted(
+                ctx.msg,
+                ctx.session_key,
+                turn_id=ctx.turn_id,
+                attributes=ctx.attributes,
+            )
+        ctx.outbound = self._assemble_outbound(
+            ctx.msg,
+            clarification,
+            ctx.stop_reason,
+            had_injections=False,
+            streamed_content=False,
+            log_content=session.policy.log_content,
+            turn_latency_ms=ctx.turn_latency_ms,
+        )
+        if ctx.ephemeral and ctx.outbound is not None:
+            ctx.outbound.metadata["_stop_reason"] = ctx.stop_reason
+        return True
+
     async def _build_turn(self, ctx: TurnContext) -> None:
         session = ctx.require_session()
         runtime = ctx.runtime
@@ -1928,7 +1997,10 @@ class AgentLoop:
 
         ctx.request_context = self._request_context_for_turn(ctx)
         if ctx.kind is TurnKind.USER:
-            ctx.runtime_context_blocks = await self._resolve_runtime_context_for_turn(ctx)
+            ctx.runtime_context_blocks = [
+                *ctx.admission_runtime_context_blocks,
+                *await self._resolve_runtime_context_for_turn(ctx),
+            ]
         staged_provider_state = False
         if stored_state is not None and runtime.provider.can_resume_conversation_state(
             stored_state,

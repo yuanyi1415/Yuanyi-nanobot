@@ -121,6 +121,8 @@ class ExperimentalConfig(Base):
     skill_auto_bind: bool = False  # 切片2：skill 自动候选 + 高置信绑定 + 注入上下文
     skill_auto_bind_max_count: int = Field(default=2, ge=1, le=10)  # 自动绑定 skill 数量上限
     skill_auto_bind_token_budget: int = Field(default=2000, ge=0)  # 绑定 skill 正文合计 token 上限（0=不限）
+    observe_admission: bool = False  # 切片3：记录续办消息的准入判断（仅日志）
+    admission_gate: bool = False  # 切片3：歧义续办表达先澄清，再进入 Runner
 
 
 class AgentDefaults(Base):
