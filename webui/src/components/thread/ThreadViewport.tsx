@@ -66,7 +66,7 @@ const DEFAULT_SCROLL_BUTTON_BOTTOM_PX = 192;
 const SCROLL_BUTTON_COMPOSER_GAP_PX = 16;
 const SOFT_KEYBOARD_MIN_INSET_PX = 80;
 export const INITIAL_HISTORY_WINDOW = 160;
-export const HISTORY_WINDOW_INCREMENT = 120;
+export const HISTORY_WINDOW_INCREMENT = 60;
 
 export function windowMessages(messages: UIMessage[], visibleCount: number): UIMessage[] {
   if (messages.length <= visibleCount) return messages;
@@ -481,7 +481,10 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
       Math.max(0, el.scrollHeight - el.clientHeight),
       Math.max(0, pending.top + delta),
     );
-    threadMotionRef.current?.jumpTo(nextTop);
+    // 加载更多后平滑滚回保持位置：瞬间 jumpTo 会让用户在翻历史时看到
+    // 4000px+ 的画面跳变（视觉卡顿）。navigateHistoryTo 走 ease-out 平滑
+    // 导航，用户滚动可自然打断（状态机已有 browsing-history 转移保护）。
+    threadMotionRef.current?.navigateHistoryTo(nextTop);
   }, [visibleMessages.length, messages.length]);
 
   useLayoutEffect(() => {

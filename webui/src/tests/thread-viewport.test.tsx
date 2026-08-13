@@ -1476,6 +1476,39 @@ describe("ThreadViewport", () => {
     expect(screen.getAllByText("message 299").length).toBeGreaterThan(0);
   });
 
+  it("smoothly restores the preserved position after prepending earlier history", async () => {
+    const navigateTo = vi.spyOn(ThreadCameraController.prototype, "navigateTo")
+      .mockReturnValue("started");
+    const longMessages = makeLongMessages(300);
+
+    const { container } = render(
+      <ThreadViewport
+        messages={longMessages}
+        isStreaming={false}
+        composer={<div />}
+      />,
+    );
+
+    const scroller = getScroller(container);
+    Object.defineProperties(scroller, {
+      scrollHeight: { configurable: true, value: 2400 },
+      clientHeight: { configurable: true, value: 600 },
+      scrollTop: { configurable: true, writable: true, value: 0 },
+    });
+    navigateTo.mockClear();
+
+    act(() => {
+      dispatchUserScroll(scroller);
+    });
+
+    // 滚动到顶触发加载更多后，位置补偿走平滑导航（navigateHistoryTo →
+    // camera.navigateTo），不再瞬间 jumpTo，避免 4000px+ 的画面跳变。
+    await waitFor(() => expect(navigateTo).toHaveBeenCalled());
+    const lastTarget = navigateTo.mock.calls.at(-1)?.[0];
+    expect(lastTarget).toBeGreaterThanOrEqual(0);
+    expect(lastTarget).toBeLessThanOrEqual(2400 - 600);
+  });
+
   it("automatically requests older transcript pages near the top", () => {
     const onLoadOlder = vi.fn();
 

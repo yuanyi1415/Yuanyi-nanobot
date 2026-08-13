@@ -674,8 +674,11 @@
   }
 
   @supports (content-visibility: auto) {
+    /* 2026-08-13 修复滑动卡顿：content-visibility: auto 的占位高度(12rem=192px)
+       与实际消息高度(20~900px)严重不符，滚动经过未渲染单元时高度突变、内容跳动。
+       取消占位渲染改全量渲染：消息窗口固定 160 条，DOM 规模可控，滚动空间稳定性优先。 */
     .thread-render-unit {
-      content-visibility: auto;
+      content-visibility: visible;
       contain-intrinsic-size: auto 12rem;
     }
   }
