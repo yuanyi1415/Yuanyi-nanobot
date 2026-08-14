@@ -1358,7 +1358,8 @@
     "fileEditOpenFile": "Abrir arquivo",
     "fileEditDiffTruncated": "Diferenças truncadas. Abra o arquivo para ver a alteração completa.",
     "activityProcessedSteps": "Processado {{count}} etapas",
-    "activityFailedSuffix": "· {{count}} falhas"
+    "activityFailedSuffix": "· {{count}} falhas",
+    "activityResizeHandle": "Ajustar altura"
   },
   "lightbox": {
     "title": "Pré-visualização de imagem",

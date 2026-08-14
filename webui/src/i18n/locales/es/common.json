@@ -1358,7 +1358,8 @@
     "automationSourceFallback": "Automatización",
     "automationTriggered": "Activada automáticamente",
     "activityProcessedSteps": "Procesado {{count}} pasos",
-    "activityFailedSuffix": "· {{count}} fallos"
+    "activityFailedSuffix": "· {{count}} fallos",
+    "activityResizeHandle": "Cambiar la altura"
   },
   "lightbox": {
     "title": "Vista previa de imagen",

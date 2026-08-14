@@ -1326,6 +1326,7 @@
     "activityWorkedFor": "Worked for {{duration}}",
     "activityProcessedSteps": "Processed {{count}} steps",
     "activityFailedSuffix": "· {{count}} failed",
+    "activityResizeHandle": "Resize height",
     "cliActivityRunningOne": "Using {{name}}",
     "cliActivityRanOne": "Used {{name}}",
     "cliActivityFailedOne": "{{name}} failed",

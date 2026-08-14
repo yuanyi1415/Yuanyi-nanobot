@@ -1358,7 +1358,8 @@
     "automationSourceFallback": "Tự động hóa",
     "automationTriggered": "Tự động kích hoạt",
     "activityProcessedSteps": "Đã xử lý {{count}} bước",
-    "activityFailedSuffix": "· {{count}} thất bại"
+    "activityFailedSuffix": "· {{count}} thất bại",
+    "activityResizeHandle": "Điều chỉnh độ cao"
   },
   "lightbox": {
     "title": "Xem trước ảnh",

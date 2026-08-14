@@ -1358,7 +1358,8 @@
     "automationSourceFallback": "자동화",
     "automationTriggered": "자동 실행됨",
     "activityProcessedSteps": "{{count}}단계 처리됨",
-    "activityFailedSuffix": "· {{count}} 실패"
+    "activityFailedSuffix": "· {{count}} 실패",
+    "activityResizeHandle": "높이 조절"
   },
   "lightbox": {
     "title": "이미지 미리보기",

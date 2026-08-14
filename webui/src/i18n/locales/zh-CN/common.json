@@ -1326,6 +1326,7 @@
     "activityWorkedFor": "处理了 {{duration}}",
     "activityProcessedSteps": "已处理 {{count}} 步",
     "activityFailedSuffix": "· {{count}} 失败",
+    "activityResizeHandle": "拖动调整高度",
     "cliActivityRunningOne": "正在使用 {{name}}",
     "cliActivityRanOne": "已使用 {{name}}",
     "cliActivityFailedOne": "使用 {{name}} 失败",

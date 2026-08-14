@@ -1,8 +1,37 @@
 import { ChevronDown } from "lucide-react";
-import type { ReactNode, Ref } from "react";
+import { useEffect, useRef, useState } from "react";
+import type { PointerEvent as ReactPointerEvent, ReactNode, Ref } from "react";
 import { useTranslation } from "react-i18next";
 
 import { cn } from "@/lib/utils";
+
+const ACTIVITY_HEIGHT_KEY = "nanobot.activityResizeHeight";
+const DEFAULT_ACTIVITY_HEIGHT = 180;
+const MIN_ACTIVITY_HEIGHT = 120;
+const MAX_ACTIVITY_HEIGHT = 560;
+
+function clampHeight(value: number): number {
+  return Math.min(MAX_ACTIVITY_HEIGHT, Math.max(MIN_ACTIVITY_HEIGHT, value));
+}
+
+function loadSavedHeight(): number {
+  try {
+    const raw = window.localStorage.getItem(ACTIVITY_HEIGHT_KEY);
+    if (raw == null) return DEFAULT_ACTIVITY_HEIGHT;
+    const parsed = Number(raw);
+    return Number.isFinite(parsed) ? clampHeight(parsed) : DEFAULT_ACTIVITY_HEIGHT;
+  } catch {
+    return DEFAULT_ACTIVITY_HEIGHT;
+  }
+}
+
+function saveHeight(value: number): void {
+  try {
+    window.localStorage.setItem(ACTIVITY_HEIGHT_KEY, String(value));
+  } catch {
+    // storage unavailable — the in-memory value still applies for this session
+  }
+}
 
 interface ThinkingReasoningShellProps {
   active: boolean;
@@ -39,6 +68,35 @@ export function ThinkingReasoningShell({
         defaultValue: "· {{count}} 失败",
       })
     : "";
+  const [maxHeight, setMaxHeight] = useState<number>(() => loadSavedHeight());
+  const maxHeightRef = useRef(maxHeight);
+  const dragState = useRef<{ pointerId: number; startY: number; startHeight: number } | null>(null);
+
+  useEffect(() => {
+    maxHeightRef.current = maxHeight;
+  }, [maxHeight]);
+
+  const onResizePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    dragState.current = {
+      pointerId: event.pointerId,
+      startY: event.clientY,
+      startHeight: maxHeightRef.current,
+    };
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+  };
+
+  const onResizePointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const drag = dragState.current;
+    if (!drag || event.pointerId !== drag.pointerId) return;
+    setMaxHeight(clampHeight(drag.startHeight + (event.clientY - drag.startY)));
+  };
+
+  const endResize = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!dragState.current || event.pointerId !== dragState.current.pointerId) return;
+    dragState.current = null;
+    saveHeight(maxHeightRef.current);
+  };
   return (
     <div
       className="flex w-full max-w-[45rem] animate-in flex-col fade-in duration-300 motion-reduce:animate-none"
@@ -102,7 +160,8 @@ export function ThinkingReasoningShell({
             data-fade-top={fadeTop}
             data-fade-bottom={fadeBottom}
             onScroll={onScroll}
-            className="mt-1.5 max-h-[180px] overflow-y-auto pr-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+            className="mt-1.5 overflow-y-auto pr-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+            style={{ maxHeight }}
             aria-hidden={!expanded}
           >
             <div ref={contentRef} className="flex flex-col gap-0.5">
@@ -125,6 +184,23 @@ export function ThinkingReasoningShell({
           ) : null}
         </div>
       </div>
+      {expanded ? (
+        <div
+          role="separator"
+          aria-orientation="horizontal"
+          aria-label={t("message.activityResizeHandle", {
+            defaultValue: "Resize height",
+          })}
+          data-testid="activity-resize-handle"
+          onPointerDown={onResizePointerDown}
+          onPointerMove={onResizePointerMove}
+          onPointerUp={endResize}
+          onPointerCancel={endResize}
+          className="group/handle -mt-px flex h-3 cursor-ns-resize touch-none select-none items-center justify-center"
+        >
+          <span className="h-0.5 w-8 rounded-full bg-border transition-colors group-hover/handle:bg-muted-foreground/50" />
+        </div>
+      ) : null}
     </div>
   );
 }

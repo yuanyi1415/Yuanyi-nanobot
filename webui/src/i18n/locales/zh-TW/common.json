@@ -1358,7 +1358,8 @@
     "automationTriggered": "已自動觸發",
     "askAboutSelection": "繼續提問",
     "activityProcessedSteps": "已處理 {{count}} 步",
-    "activityFailedSuffix": "· {{count}} 失敗"
+    "activityFailedSuffix": "· {{count}} 失敗",
+    "activityResizeHandle": "拖動調整高度"
   },
   "lightbox": {
     "title": "圖片預覽",

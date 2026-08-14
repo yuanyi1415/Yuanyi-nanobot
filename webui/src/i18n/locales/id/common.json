@@ -1358,7 +1358,8 @@
     "automationSourceFallback": "Otomatisasi",
     "automationTriggered": "Dipicu otomatis",
     "activityProcessedSteps": "Memproses {{count}} langkah",
-    "activityFailedSuffix": "· {{count}} gagal"
+    "activityFailedSuffix": "· {{count}} gagal",
+    "activityResizeHandle": "Ubah tinggi"
   },
   "lightbox": {
     "title": "Pratinjau gambar",

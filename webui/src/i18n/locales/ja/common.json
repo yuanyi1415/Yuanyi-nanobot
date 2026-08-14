@@ -1358,7 +1358,8 @@
     "automationSourceFallback": "自動化",
     "automationTriggered": "自動実行",
     "activityProcessedSteps": "{{count}} ステップ処理しました",
-    "activityFailedSuffix": "· {{count}} 失敗"
+    "activityFailedSuffix": "· {{count}} 失敗",
+    "activityResizeHandle": "高さを調整"
   },
   "lightbox": {
     "title": "画像プレビュー",
