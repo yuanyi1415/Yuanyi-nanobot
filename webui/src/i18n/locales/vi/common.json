@@ -1356,7 +1356,9 @@
     "cliRunRan": "Đã dùng",
     "cliRunFailed": "Thất bại",
     "automationSourceFallback": "Tự động hóa",
-    "automationTriggered": "Tự động kích hoạt"
+    "automationTriggered": "Tự động kích hoạt",
+    "activityProcessedSteps": "Đã xử lý {{count}} bước",
+    "activityFailedSuffix": "· {{count}} thất bại"
   },
   "lightbox": {
     "title": "Xem trước ảnh",

@@ -449,10 +449,10 @@ describe("AgentActivityCluster", () => {
       />,
     );
 
-    expect(screen.getByText("Thought for 12s")).toBeInTheDocument();
+    expect(screen.getByText("Thought")).toBeInTheDocument();
   });
 
-  it("labels mixed tool activity as work instead of thought", () => {
+  it("labels mixed tool activity as processed steps", () => {
     render(
       <AgentActivityCluster
         messages={activityMessages()}
@@ -462,7 +462,7 @@ describe("AgentActivityCluster", () => {
       />,
     );
 
-    expect(screen.getByText("Worked for 12s")).toBeInTheDocument();
+    expect(screen.getByText("Processed 2 steps")).toBeInTheDocument();
     expect(screen.queryByText("Thought for 12s")).not.toBeInTheDocument();
   });
 
@@ -1260,7 +1260,8 @@ describe("AgentActivityCluster", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Worked" }));
+    fireEvent.click(screen.getByRole("button", { name: "Processed 1 steps" }));
+    expect(screen.getByTestId("activity-failure-badge")).toBeInTheDocument();
 
     const row = screen.getByText("Could not use GitHub · --json repo view").closest(
       '[data-testid="activity-step"]',
@@ -1553,7 +1554,7 @@ describe("AgentActivityCluster", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Worked" }));
+    fireEvent.click(screen.getByRole("button", { name: "Processed 1 steps" }));
 
     expect(screen.getByText("Ran command cat << 'EOF' | bash · script, 6 lines")).toBeInTheDocument();
     expect(screen.queryByText(/SECRET_TOKEN/)).not.toBeInTheDocument();

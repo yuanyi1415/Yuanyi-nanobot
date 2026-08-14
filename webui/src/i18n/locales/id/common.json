@@ -1356,7 +1356,9 @@
     "cliRunRan": "Digunakan",
     "cliRunFailed": "Gagal",
     "automationSourceFallback": "Otomatisasi",
-    "automationTriggered": "Dipicu otomatis"
+    "automationTriggered": "Dipicu otomatis",
+    "activityProcessedSteps": "Memproses {{count}} langkah",
+    "activityFailedSuffix": "· {{count}} gagal"
   },
   "lightbox": {
     "title": "Pratinjau gambar",

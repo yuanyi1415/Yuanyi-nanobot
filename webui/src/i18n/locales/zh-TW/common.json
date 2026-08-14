@@ -1356,7 +1356,9 @@
     "cliRunFailed": "失敗",
     "automationSourceFallback": "自動化",
     "automationTriggered": "已自動觸發",
-    "askAboutSelection": "繼續提問"
+    "askAboutSelection": "繼續提問",
+    "activityProcessedSteps": "已處理 {{count}} 步",
+    "activityFailedSuffix": "· {{count}} 失敗"
   },
   "lightbox": {
     "title": "圖片預覽",

@@ -88,26 +88,74 @@ export function normalizeActivityTimeline(
       activityMessages = [];
     };
 
-    for (const message of orderedTurnMessages) {
-      if (isAgentActivityMember(message)) {
-        activityMessages.push(message);
-        continue;
-      }
+    const turnComplete =
+      !orderedTurnMessages.some(
+        (message) => message.isStreaming || message.reasoningStreaming,
+      ) && orderedTurnMessages.some(isAgentActivityMember);
 
-      if (assistantHasInlineReasoning(message)) {
-        activityMessages.push(reasoningOnlyMessageFromAnswer(message));
-        flushActivityMessages();
-        turnUnits.push({ type: "message", message: stripInlineReasoning(message) });
+    if (turnComplete) {
+      // Completed turn with agent activity: fold the whole turn into a single
+      // activity unit (thoughts, tool traces, file edits AND any intermediate
+      // body text) followed by the final answer body. Intermediate body text
+      // becomes "process text" inside the activity unit instead of standalone
+      // message rows, so the terminal view is: [已处理] + [最终回复].
+      let finalBody: UIMessage | undefined;
+      let finalBodyIndex = -1;
+      for (let i = orderedTurnMessages.length - 1; i >= 0; i -= 1) {
+        if (!isAgentActivityMember(orderedTurnMessages[i])) {
+          finalBodyIndex = i;
+          break;
+        }
+      }
+      for (let i = 0; i < orderedTurnMessages.length; i += 1) {
+        const message = orderedTurnMessages[i];
+        if (isAgentActivityMember(message)) {
+          activityMessages.push(message);
+          continue;
+        }
+        if (i === finalBodyIndex) {
+          if (assistantHasInlineReasoning(message)) {
+            activityMessages.push(reasoningOnlyMessageFromAnswer(message));
+          }
+          finalBody = assistantHasInlineReasoning(message)
+            ? stripInlineReasoning(message)
+            : message;
+          continue;
+        }
+        if (assistantHasInlineReasoning(message)) {
+          activityMessages.push(reasoningOnlyMessageFromAnswer(message));
+          activityMessages.push(stripInlineReasoning(message));
+        } else {
+          activityMessages.push(message);
+        }
+      }
+      flushActivityMessages();
+      if (finalBody) {
+        turnUnits.push({ type: "message", message: finalBody });
         visibleIndex += 1;
-        continue;
+      }
+    } else {
+      for (const message of orderedTurnMessages) {
+        if (isAgentActivityMember(message)) {
+          activityMessages.push(message);
+          continue;
+        }
+
+        if (assistantHasInlineReasoning(message)) {
+          activityMessages.push(reasoningOnlyMessageFromAnswer(message));
+          flushActivityMessages();
+          turnUnits.push({ type: "message", message: stripInlineReasoning(message) });
+          visibleIndex += 1;
+          continue;
+        }
+
+        flushActivityMessages();
+        turnUnits.push({ type: "message", message });
+        visibleIndex += 1;
       }
 
       flushActivityMessages();
-      turnUnits.push({ type: "message", message });
-      visibleIndex += 1;
     }
-
-    flushActivityMessages();
     units.push(...normalizeCompletedTurnUnits(turnUnits, flushOptions));
     turnMessages = [];
     activeTurnId = undefined;
@@ -199,45 +247,16 @@ function pushActivityUnits(
   visibleMessages: UIMessage[],
   startedAtMs?: number,
 ) {
-  let runMessages: UIMessage[] = [];
-  let runBucket: "file" | "other" | undefined;
-  let runSegmentId: string | undefined;
-
-  const flushRun = () => {
-    if (!runMessages.length) return;
-    units.push({
-      type: "activity",
-      messages: runMessages,
-      turnLatencyMs: activityTurnLatencyMs(runMessages, visibleMessages),
-      startedAtMs,
-    });
-    runMessages = [];
-    runBucket = undefined;
-    runSegmentId = undefined;
-  };
-
-  for (const message of activityMessages) {
-    const bucket = isFileEditActivityMessage(message) ? "file" : "other";
-    const segmentId = message.activitySegmentId;
-    const segmentChanged =
-      bucket === "file"
-      && runBucket === "file"
-      && !!runSegmentId
-      && !!segmentId
-      && runSegmentId !== segmentId;
-    if ((runBucket && bucket !== runBucket) || segmentChanged) {
-      flushRun();
-    }
-    runBucket = bucket;
-    if (segmentId) runSegmentId = segmentId;
-    runMessages.push(message);
-  }
-
-  flushRun();
-}
-
-function isFileEditActivityMessage(message: UIMessage): boolean {
-  return message.kind === "trace" && !!message.fileEdits?.length;
+  // All activity messages of a turn fold into a single activity unit: thoughts,
+  // tool traces, file edits and process text keep their natural order inside
+  // one collapsible block ("已处理"). No file/other bucketing — the terminal
+  // view is one fold per turn, not one fold per activity segment.
+  units.push({
+    type: "activity",
+    messages: activityMessages,
+    turnLatencyMs: activityTurnLatencyMs(activityMessages, visibleMessages),
+    startedAtMs,
+  });
 }
 
 function assistantHasInlineReasoning(message: UIMessage): boolean {

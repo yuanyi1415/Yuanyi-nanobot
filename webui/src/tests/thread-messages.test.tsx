@@ -276,7 +276,7 @@ describe("ThreadMessages", () => {
     ]);
   });
 
-  it("keeps file edits as their own activity row inside a turn", () => {
+  it("keeps file edits inside the folded activity unit of a turn", () => {
     const messages: UIMessage[] = [
       {
         id: "r1",
@@ -316,11 +316,12 @@ describe("ThreadMessages", () => {
 
     const units = buildDisplayUnits(messages);
 
-    expect(units).toHaveLength(3);
-    expect(units.map((unit) => unit.type)).toEqual(["activity", "activity", "activity"]);
-    expect(units[0].type === "activity" ? units[0].messages.map((m) => m.id) : []).toEqual(["r1"]);
-    expect(units[1].type === "activity" ? units[1].messages.map((m) => m.id) : []).toEqual(["t1"]);
-    expect(units[2].type === "activity" ? units[2].messages.map((m) => m.id) : []).toEqual(["r2"]);
+    expect(units).toHaveLength(1);
+    expect(units[0].type === "activity" ? units[0].messages.map((m) => m.id) : []).toEqual([
+      "r1",
+      "t1",
+      "r2",
+    ]);
   });
 
   it("keeps ordinary tool activity in one Thought block across segment ids", () => {
@@ -372,7 +373,7 @@ describe("ThreadMessages", () => {
     ]);
   });
 
-  it("moves orphan trailing activity before the completed assistant answer", () => {
+  it("folds trailing activity into the folded unit before the final answer", () => {
     const messages: UIMessage[] = [
       {
         id: "r1",
@@ -401,10 +402,9 @@ describe("ThreadMessages", () => {
 
     const units = buildDisplayUnits(messages);
 
-    expect(units).toHaveLength(3);
-    expect(units[0].type === "activity" ? units[0].messages.map((m) => m.id) : []).toEqual(["r1"]);
-    expect(units[1].type === "activity" ? units[1].messages.map((m) => m.id) : []).toEqual(["t1"]);
-    expect(units[2]).toMatchObject({
+    expect(units).toHaveLength(2);
+    expect(units[0].type === "activity" ? units[0].messages.map((m) => m.id) : []).toEqual(["r1", "t1"]);
+    expect(units[1]).toMatchObject({
       type: "message",
       message: {
         id: "a1",
@@ -456,8 +456,9 @@ describe("ThreadMessages", () => {
 
     render(<ThreadMessages messages={messages} isStreaming />);
 
-    expect(screen.getByLabelText(/edited foo\.txt/i)).toBeInTheDocument();
-    expect(screen.queryByLabelText(/editing foo\.txt/i)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /working/i })).toBeInTheDocument();
+    expect(screen.getByLabelText(/editing foo\.txt/i)).toBeInTheDocument();
+    expect(screen.queryByLabelText(/edited foo\.txt/i)).not.toBeInTheDocument();
   });
 
   it("times live activity from the user turn start", () => {
@@ -551,7 +552,7 @@ describe("ThreadMessages", () => {
 
     render(<ThreadMessages messages={messages} isStreaming={false} />);
     expect(screen.queryByRole("button", { name: /^thinking$/i })).not.toBeInTheDocument();
-    expect(screen.getByText("Worked for 9s")).toBeInTheDocument();
+    expect(screen.getByText("Processed 3 steps")).toBeInTheDocument();
     expect(screen.getByText("final answer")).toBeInTheDocument();
   });
 
@@ -588,8 +589,8 @@ describe("ThreadMessages", () => {
     expect(units[0].type === "activity" ? units[0].turnLatencyMs : undefined).toBe(20_000);
 
     render(<ThreadMessages messages={messages} isStreaming={false} />);
-    expect(screen.getByText("Worked for 20s")).toBeInTheDocument();
-    expect(screen.queryByText("Worked for 3s")).not.toBeInTheDocument();
+    expect(screen.getByText("Processed 2 steps")).toBeInTheDocument();
+    expect(screen.queryByText("Processed 1 steps")).not.toBeInTheDocument();
   });
 
   it("keeps late activity after the live assistant answer while streaming", () => {
@@ -641,7 +642,7 @@ describe("ThreadMessages", () => {
     expect(answer.compareDocumentPosition(liveActivity) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it("moves late activity before a completed assistant answer", () => {
+  it("folds late activity into the unit before a completed assistant answer", () => {
     const messages: UIMessage[] = [
       {
         id: "r1",
@@ -671,10 +672,9 @@ describe("ThreadMessages", () => {
 
     const units = buildDisplayUnits(messages);
 
-    expect(units).toHaveLength(3);
-    expect(units[0].type === "activity" ? units[0].messages.map((m) => m.id) : []).toEqual(["r1"]);
-    expect(units[1].type === "activity" ? units[1].messages.map((m) => m.id) : []).toEqual(["t1"]);
-    expect(units[2]).toMatchObject({
+    expect(units).toHaveLength(2);
+    expect(units[0].type === "activity" ? units[0].messages.map((m) => m.id) : []).toEqual(["r1", "t1"]);
+    expect(units[1]).toMatchObject({
       type: "message",
       message: {
         id: "a1",
@@ -685,9 +685,8 @@ describe("ThreadMessages", () => {
     render(<ThreadMessages messages={messages} isStreaming={false} />);
 
     const answer = screen.getByText("Hong Kong is hot today.");
-    const laterActivity = screen.getAllByText(/thought/i).at(-1);
-    expect(laterActivity).toBeTruthy();
-    expect(laterActivity!.compareDocumentPosition(answer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const activity = screen.getByRole("button", { name: /processed/i });
+    expect(activity.compareDocumentPosition(answer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it("does not leave a completed web-search thought below the final answer", () => {
@@ -726,10 +725,10 @@ describe("ThreadMessages", () => {
 
     render(<ThreadMessages messages={messages} isStreaming={false} />);
 
-    const thought = screen.getAllByText(/thought/i).at(-1);
+    const activity = screen.getByRole("button", { name: /processed/i });
     const answer = screen.getByText("知道，IEM Cologne Major 2026 今天开打了。");
-    expect(thought).toBeTruthy();
-    expect(thought!.compareDocumentPosition(answer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(activity).toBeTruthy();
+    expect(activity.compareDocumentPosition(answer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it("normalizes completed prior turns while the next user turn is streaming", () => {
@@ -768,18 +767,16 @@ describe("ThreadMessages", () => {
 
     const units = buildDisplayUnits(messages, true);
 
-    expect(units).toHaveLength(4);
+    expect(units).toHaveLength(3);
     expect(units[0].type === "activity" ? units[0].messages.map((m) => m.id) : []).toEqual([
       "thought",
-    ]);
-    expect(units[1].type === "activity" ? units[1].messages.map((m) => m.id) : []).toEqual([
       "web",
     ]);
-    expect(units[2]).toMatchObject({
+    expect(units[1]).toMatchObject({
       type: "message",
       message: { id: "answer" },
     });
-    expect(units[3]).toMatchObject({
+    expect(units[2]).toMatchObject({
       type: "message",
       message: { id: "next-user" },
     });
@@ -906,11 +903,11 @@ describe("ThreadMessages", () => {
 
     render(<ThreadMessages messages={messages} isStreaming={false} />);
 
-    expect(screen.getByText("Worked for 15s")).toBeInTheDocument();
-    expect(screen.queryByText("Worked for 0s")).not.toBeInTheDocument();
+    expect(screen.getByText("Processed 2 steps")).toBeInTheDocument();
+    expect(screen.queryByText("Processed 1 steps")).not.toBeInTheDocument();
   });
 
-  it("shows copy on every assistant slice while keeping fork on the last slice", () => {
+  it("shows copy/fork on the folded final answer only (process text stays inside 已处理)", () => {
     const messages: UIMessage[] = [
       {
         id: "early",
@@ -942,9 +939,13 @@ describe("ThreadMessages", () => {
       />,
     );
 
-    expect(screen.getAllByRole("button", { name: "Copy" })).toHaveLength(2);
+    expect(screen.getAllByRole("button", { name: "Copy" })).toHaveLength(1);
     expect(screen.getAllByRole("button", { name: "Fork" })).toHaveLength(1);
     expect(screen.getByText("final reply")).toBeInTheDocument();
+    // Process text stays inside 已处理: hidden while folded, visible on expand.
+    expect(screen.getByText("starting…").closest("[data-state=done]")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /processed/i }));
+    expect(screen.getByText("starting…")).toBeInTheDocument();
   });
 
   it("shows copy on adjacent assistant text slices", () => {
@@ -1035,7 +1036,6 @@ describe("ThreadMessages", () => {
       .filter(Boolean);
 
     expect(assistantFlags).toEqual([
-      ["a1", false],
       ["a2", true],
       ["a3", true],
     ]);

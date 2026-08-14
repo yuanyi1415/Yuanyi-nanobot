@@ -1356,7 +1356,9 @@
     "cliRunRan": "Usado",
     "cliRunFailed": "Falló",
     "automationSourceFallback": "Automatización",
-    "automationTriggered": "Activada automáticamente"
+    "automationTriggered": "Activada automáticamente",
+    "activityProcessedSteps": "Procesado {{count}} pasos",
+    "activityFailedSuffix": "· {{count}} fallos"
   },
   "lightbox": {
     "title": "Vista previa de imagen",

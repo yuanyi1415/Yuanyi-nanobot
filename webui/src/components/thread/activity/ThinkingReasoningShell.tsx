@@ -1,5 +1,6 @@
 import { ChevronDown } from "lucide-react";
 import type { ReactNode, Ref } from "react";
+import { useTranslation } from "react-i18next";
 
 import { cn } from "@/lib/utils";
 
@@ -7,6 +8,8 @@ interface ThinkingReasoningShellProps {
   active: boolean;
   expanded: boolean;
   label: string;
+  /** Number of failed activity steps; shows a red badge next to the label. */
+  errorCount?: number;
   children: ReactNode;
   viewportRef: Ref<HTMLDivElement>;
   contentRef: Ref<HTMLDivElement>;
@@ -20,6 +23,7 @@ export function ThinkingReasoningShell({
   active,
   expanded,
   label,
+  errorCount = 0,
   children,
   viewportRef,
   contentRef,
@@ -28,6 +32,13 @@ export function ThinkingReasoningShell({
   onToggle,
   onScroll,
 }: ThinkingReasoningShellProps) {
+  const { t } = useTranslation();
+  const errorLabel = errorCount > 0
+    ? t("message.activityFailedSuffix", {
+        count: errorCount,
+        defaultValue: "· {{count}} 失败",
+      })
+    : "";
   return (
     <div
       className="flex w-full max-w-[45rem] animate-in flex-col fade-in duration-300 motion-reduce:animate-none"
@@ -50,6 +61,14 @@ export function ThinkingReasoningShell({
         >
           {label}
         </span>
+        {errorLabel ? (
+          <span
+            data-testid="activity-failure-badge"
+            className="shrink-0 rounded-full bg-red-500/10 px-1.5 py-px text-[11px] font-semibold leading-[16px] text-red-500"
+          >
+            {errorLabel}
+          </span>
+        ) : null}
         <span
           className={cn(
             "inline-flex shrink-0 transition-transform [transition-duration:220ms] ease-out",

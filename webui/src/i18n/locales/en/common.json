@@ -1324,6 +1324,8 @@
     "activityWorkingFor": "Working for {{duration}}",
     "activityWorked": "Worked",
     "activityWorkedFor": "Worked for {{duration}}",
+    "activityProcessedSteps": "Processed {{count}} steps",
+    "activityFailedSuffix": "· {{count}} failed",
     "cliActivityRunningOne": "Using {{name}}",
     "cliActivityRanOne": "Used {{name}}",
     "cliActivityFailedOne": "{{name}} failed",

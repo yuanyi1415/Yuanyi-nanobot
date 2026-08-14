@@ -1356,7 +1356,9 @@
     "cliRunRan": "使用済み",
     "cliRunFailed": "失敗",
     "automationSourceFallback": "自動化",
-    "automationTriggered": "自動実行"
+    "automationTriggered": "自動実行",
+    "activityProcessedSteps": "{{count}} ステップ処理しました",
+    "activityFailedSuffix": "· {{count}} 失敗"
   },
   "lightbox": {
     "title": "画像プレビュー",

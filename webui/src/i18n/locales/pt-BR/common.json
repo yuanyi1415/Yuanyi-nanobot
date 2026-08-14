@@ -1356,7 +1356,9 @@
     "fileEditShowMoreLines": "Mostrar mais {{count}} linhas",
     "fileEditShowFewerLines": "Mostrar menos linhas",
     "fileEditOpenFile": "Abrir arquivo",
-    "fileEditDiffTruncated": "Diferenças truncadas. Abra o arquivo para ver a alteração completa."
+    "fileEditDiffTruncated": "Diferenças truncadas. Abra o arquivo para ver a alteração completa.",
+    "activityProcessedSteps": "Processado {{count}} etapas",
+    "activityFailedSuffix": "· {{count}} falhas"
   },
   "lightbox": {
     "title": "Pré-visualização de imagem",

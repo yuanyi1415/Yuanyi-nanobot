@@ -27,6 +27,7 @@ import {
   parseGenericToolTrace,
 } from "@/components/thread/activity/generic-tool-model";
 import { ReasoningRow } from "@/components/thread/activity/ReasoningRow";
+import { ProcessTextRow } from "@/components/thread/activity/ProcessTextRow";
 import { describeMcpActivity } from "@/components/thread/activity/mcp-activity-model";
 import { ThinkingReasoningShell } from "@/components/thread/activity/ThinkingReasoningShell";
 import { WebActivityRow } from "@/components/thread/activity/WebActivityRow";
@@ -197,29 +198,24 @@ export function AgentActivityCluster({
     startedAtMs,
   );
   const activityDuration = formatActivityDuration(durationMs);
-  const thoughtLabel = hasNonReasoningActivity
-    ? isTurnStreaming
+  const failureSteps = countFailureSteps(activityMessages, fileEdits);
+  const totalSteps = reasoningSteps + toolCalls + cliCount + mcpCount + fileCount;
+  const thoughtLabel = isTurnStreaming
+    ? hasNonReasoningActivity
       ? t("message.activityWorkingFor", {
           duration: activityDuration,
           defaultValue: "Working for {{duration}}",
         })
-      : durationMs <= 0
-        ? t("message.activityWorked", { defaultValue: "Worked" })
-      : t("message.activityWorkedFor", {
-          duration: activityDuration,
-          defaultValue: "Worked for {{duration}}",
-        })
-    : isTurnStreaming
-      ? t("message.activityThinkingFor", {
+      : t("message.activityThinkingFor", {
           duration: activityDuration,
           defaultValue: "Thinking for {{duration}}",
         })
-      : durationMs <= 0
-        ? t("message.activityThought", { defaultValue: "Thought" })
-      : t("message.activityThoughtFor", {
-          duration: activityDuration,
-          defaultValue: "Thought for {{duration}}",
-        });
+    : hasNonReasoningActivity
+      ? t("message.activityProcessedSteps", {
+          count: totalSteps,
+          defaultValue: "已处理 {{count}} 步",
+        })
+      : t("message.activityThought", { defaultValue: "Thought" });
 
   const cancelActivityScrollFrame = useCallback(() => {
     if (scrollFrameRef.current !== null) {
@@ -339,6 +335,7 @@ export function AgentActivityCluster({
         active={isTurnStreaming}
         expanded={outerExpanded}
         label={thoughtLabel}
+        errorCount={failureSteps}
         viewportRef={activityScrollRef}
         contentRef={activityContentRef}
         fadeTop={activityScrollFade.top}
@@ -367,6 +364,20 @@ export function AgentActivityCluster({
 function messageHasOnlyFileActivity(message: UIMessage): boolean {
   if (message.kind !== "trace" || !message.fileEdits?.length) return false;
   return traceLines(message).every((line) => !line.trim() || isFileEditTraceLine(line));
+}
+
+function countFailureSteps(messages: UIMessage[], fileEdits: FileEditSummary[]): number {
+  let failures = 0;
+  for (const message of messages) {
+    if (message.kind !== "trace") continue;
+    for (const event of message.toolEvents ?? []) {
+      if (event.phase === "error") failures += 1;
+    }
+  }
+  for (const edit of fileEdits) {
+    if (edit.status === "error") failures += 1;
+  }
+  return failures;
 }
 
 function activityDurationMs(
@@ -439,6 +450,12 @@ function ActivityMessageTimeline({
           mcpPresetsByName={mcpPresetsByName}
         />,
       );
+      return;
+    }
+    if (message.content.trim()) {
+      // Intermediate body text folded into the completed activity unit
+      // ("process text"): kept inside 已处理 instead of standalone rows.
+      items.push(<ProcessTextRow key={message.id} text={message.content} />);
     }
   });
   return <>{items}</>;
