@@ -336,3 +336,19 @@ Nanobot was started by [Xubin Ren](https://github.com/re-bin) as a personal open
   <em> Thanks for visiting ✨ nanobot!</em><br><br>
   <img src="https://visitor-badge.laobi.icu/badge?page_id=HKUDS.nanobot&style=for-the-badge&color=00d4ff" alt="Views">
 </p>
+
+---
+
+## 本机开发环境（双环境机制）
+
+本仓库在本机采用 **dev 开发 / 生产运行双环境隔离** 机制：
+
+- **开发库**（本仓库）：日常开发、验证、提交
+- **生产库**（13_nanobot）：launchd 托管的运行实例，只做 fetch + reset 对齐，不直接开发
+- **桌面壳**（Electron 客户端）：纯前端"显示器"，直连生产 gateway，不持有数据
+
+**隔离边界**：会话数据、cron 调度、trigger 投递、Dream 记忆在 dev 与生产之间完全独立（可写状态一律隔离，只读配置共享）；dev 禁用微信通道、端口独立。
+
+**桌面壳测试规则**：纯壳代码改动（通知/窗口/对话框）直接 `npm run dev` 连默认环境即可；改 WebUI 或测试消息流时用环境变量把壳指向 dev 环境（`NANOBOT_DESKTOP_GATEWAY_PORT` / `NANOBOT_DESKTOP_WEB_DEV_URL`）。
+
+**完整开发规范**（端口、命令、制度红线、发布链）见开发库本地目录 `Yuanyi-研发/05_nanobot开发环境规范/开发环境启动规范.md`——该目录本地维护、不入 git，仅存在于开发机。
