@@ -709,6 +709,7 @@ export function ThreadShell({
     messagesReady,
     isStreaming,
     runStartedAt,
+    turnEnded,
     goalState,
     subagents,
     send,
@@ -1592,6 +1593,7 @@ export function ThreadShell({
             messages={displayMessages}
             temporary={temporary}
             isStreaming={turnActive}
+            turnEnded={turnEnded}
             emptyState={emptyState}
             composer={composer}
             subagentStrip={subagentStrip}

@@ -11,6 +11,10 @@ export type TurnUnit =
 
 interface NormalizeActivityTimelineOptions {
   preserveTrailingActivity?: boolean;
+  /** Turn-granularity in-flight flag: when true, the (last) turn is still
+   *  producing output and must NOT be folded into a completed "已处理" unit,
+   *  even if no message is streaming right now (gaps between text segments). */
+  turnInFlight?: boolean;
 }
 
 export function isReasoningOnlyAssistant(message: UIMessage): boolean {
@@ -89,7 +93,8 @@ export function normalizeActivityTimeline(
     };
 
     const turnComplete =
-      !orderedTurnMessages.some(
+      !flushOptions.turnInFlight
+      && !orderedTurnMessages.some(
         (message) => message.isStreaming || message.reasoningStreaming,
       ) && orderedTurnMessages.some(isAgentActivityMember);
 

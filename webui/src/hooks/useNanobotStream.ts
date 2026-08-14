@@ -235,6 +235,8 @@ export function useNanobotStream(
   isStreaming: boolean;
   /** Unix epoch seconds when the current user turn started (WebSocket ``goal_status``). */
   runStartedAt: number | null;
+  /** Turn-granularity completion signal (true once the last turn received turn_end). */
+  turnEnded: boolean;
   /** Latest sustained goal for this ``chatId`` (``goal_state`` WS events). */
   goalState: GoalStateWsPayload | undefined;
   /** Lifecycle status of background subagents for this chat (``subagent_status`` events). */
@@ -267,6 +269,16 @@ export function useNanobotStream(
   );
   /** Unix epoch seconds when the current user turn started; cleared on ``idle``. */
   const [runStartedAt, setRunStartedAt] = useState<number | null>(initialRunStartedAt);
+  /**
+   * True once the last turn fully completed (received ``turn_end``), false
+   * while a turn is producing output (delta / reasoning_delta / run start).
+   * Unlike ``isStreaming`` (message-granularity, flipped by every
+   * ``stream_end``), this is the turn-granularity signal the activity fold
+   * uses so intermediate gaps between text segments never collapse the
+   * in-flight "已处理" block.  Initial ``true`` so replayed history renders
+   * folded (terminal state) instead of expanding the last activity.
+   */
+  const [turnEnded, setTurnEnded] = useState(true);
   const [goalState, setGoalState] = useState<GoalStateWsPayload | undefined>(undefined);
   const [subagents, setSubagents] = useState<SubagentStatusItem[]>(NO_SUBAGENTS);
   const [streamError, setStreamError] = useState<StreamError | null>(null);
@@ -734,6 +746,7 @@ export function useNanobotStream(
         if (!chunk) return;
         clearActivitySegment();
         setIsStreaming(true);
+        setTurnEnded(false);
         pendingStreamEventsRef.current.push({
           kind: "delta",
           text: chunk,
@@ -750,6 +763,7 @@ export function useNanobotStream(
         if (!chunk) return;
         if (fileEditSegmentRef.current) clearActivitySegment();
         setIsStreaming(true);
+        setTurnEnded(false);
         pendingStreamEventsRef.current.push({
           kind: "reasoning",
           text: chunk,
@@ -822,6 +836,7 @@ export function useNanobotStream(
         if (ev.status === "running" && typeof ev.started_at === "number") {
           setRunStartedAt(ev.started_at);
           setIsStreaming(true);
+          setTurnEnded(false);
         } else {
           setRunStartedAt(null);
           setIsStreaming(false);
@@ -834,6 +849,7 @@ export function useNanobotStream(
           setGoalState(ev.goal_state);
         }
         setRunStartedAt(null);
+        setTurnEnded(true);
         // A completed turn means finished subagents no longer need their
         // status pills; keep only still-running ones (they may span turns).
         setSubagents((prev) => {
@@ -1204,6 +1220,7 @@ export function useNanobotStream(
     messagesReady: messageOwnerChatId === chatId,
     isStreaming,
     runStartedAt,
+    turnEnded,
     goalState,
     subagents,
     send,

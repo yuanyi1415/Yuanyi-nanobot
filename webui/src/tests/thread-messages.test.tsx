@@ -638,8 +638,80 @@ describe("ThreadMessages", () => {
     render(<ThreadMessages messages={messages} isStreaming />);
 
     const answer = screen.getByText("partial answer");
-    const liveActivity = screen.getByRole("button", { name: /working/i });
+    // Turn is still in flight: every activity cluster of the turn stays
+    // expanded (not just the last one) — no mid-turn collapse.
+    const workingButtons = screen.getAllByRole("button", { name: /working/i });
+    expect(workingButtons.length).toBeGreaterThanOrEqual(2);
+    const liveActivity = workingButtons[workingButtons.length - 1];
     expect(answer.compareDocumentPosition(liveActivity) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("keeps every in-turn activity cluster expanded across segment gaps (isStreaming=false, turnEnded=false) and folds them only after turn_end", () => {
+    vi.useFakeTimers();
+    const turnId = "turn-multi";
+    const messages: UIMessage[] = [
+      { id: "u1", role: "user", content: "question", createdAt: 1, turnId },
+      {
+        id: "r1",
+        role: "assistant",
+        content: "",
+        reasoning: "thinking about step one",
+        activitySegmentId: "seg-1",
+        createdAt: 2,
+        turnId,
+      },
+      {
+        id: "t1",
+        role: "tool",
+        kind: "trace",
+        content: "search()",
+        traces: ["search()"],
+        activitySegmentId: "seg-1",
+        createdAt: 3,
+        turnId,
+      },
+      {
+        id: "a1",
+        role: "assistant",
+        content: "intermediate answer (segment one)",
+        createdAt: 4,
+        turnId,
+      },
+      {
+        id: "r2",
+        role: "assistant",
+        content: "",
+        reasoning: "thinking about step two",
+        activitySegmentId: "seg-2",
+        createdAt: 5,
+        turnId,
+      },
+      {
+        id: "t2",
+        role: "tool",
+        kind: "trace",
+        content: "fetch_page()",
+        traces: ["fetch_page()"],
+        activitySegmentId: "seg-2",
+        createdAt: 6,
+        turnId,
+      },
+    ];
+
+    // 段间空隙（正文段已流完、下一段未开始）：isStreaming=false 但 turnEnded=false
+    // ——两个 activity cluster 都必须保持展开，任何中间折叠都是闪烁
+    const { rerender } = render(
+      <ThreadMessages messages={messages} isStreaming={false} turnEnded={false} />,
+    );
+    const workingButtons = screen.getAllByRole("button", { name: /working/i });
+    expect(workingButtons.length).toBeGreaterThanOrEqual(2);
+
+    // turn 真正结束：全部折叠成"已处理"
+    rerender(<ThreadMessages messages={messages} isStreaming={false} turnEnded />);
+    act(() => {
+      vi.advanceTimersByTime(301);
+    });
+    expect(screen.queryByRole("button", { name: /working/i })).not.toBeInTheDocument();
   });
 
   it("folds late activity into the unit before a completed assistant answer", () => {
@@ -1039,5 +1111,43 @@ describe("ThreadMessages", () => {
       ["a2", true],
       ["a3", true],
     ]);
+  });
+
+  it("keeps the in-flight activity block expanded between text segments (turnEnded=false) and folds it once the turn truly ends", () => {
+    vi.useFakeTimers();
+    const turnId = "turn-gap";
+    const messages: UIMessage[] = [
+      { id: "u1", role: "user", content: "question", createdAt: 1, turnId },
+      {
+        id: "a1",
+        role: "assistant",
+        content: "",
+        reasoning: "thinking…",
+        createdAt: 2,
+        turnId,
+      },
+      {
+        id: "t1",
+        role: "tool",
+        kind: "trace",
+        content: "search()",
+        traces: ["search()"],
+        createdAt: 3,
+        turnId,
+      },
+    ];
+    // 段间空隙：没有消息在流（isStreaming=false）但 turn 未结束（turnEnded=false）
+    // ——活动块必须保持展开，不能误折叠
+    const { rerender } = render(
+      <ThreadMessages messages={messages} isStreaming={false} turnEnded={false} />,
+    );
+    expect(screen.getByTestId("agent-activity-scroll")).toBeInTheDocument();
+
+    // turn 真正结束（turn_end 到达）：短暂完成态后折叠成"已处理"
+    rerender(<ThreadMessages messages={messages} isStreaming={false} turnEnded />);
+    act(() => {
+      vi.advanceTimersByTime(301);
+    });
+    expect(screen.queryByTestId("agent-activity-scroll")).not.toBeInTheDocument();
   });
 });

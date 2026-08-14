@@ -38,6 +38,8 @@ interface ThreadViewportProps {
   messages: UIMessage[];
   temporary?: boolean;
   isStreaming: boolean;
+  /** Turn-granularity completion signal (true once the last turn received turn_end). */
+  turnEnded: boolean;
   composer: ReactNode;
   emptyState?: ReactNode;
   /** Rendered at the end of the message flow (above the composer). */
@@ -163,6 +165,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
   messages,
   temporary = false,
   isStreaming,
+  turnEnded,
   composer,
   emptyState,
   subagentStrip,
@@ -693,6 +696,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
                   messages={visibleMessages}
                   temporary={temporary}
                   isStreaming={isStreaming}
+                  turnEnded={turnEnded}
                   hiddenUserMessageCount={hiddenUserMessageCount}
                   cliApps={cliApps}
                   mcpPresets={mcpPresets}

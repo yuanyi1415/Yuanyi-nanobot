@@ -11,6 +11,10 @@ interface ThreadMessagesProps {
   temporary?: boolean;
   /** When true, agent turn still in flight — keeps activity timeline expanded. */
   isStreaming?: boolean;
+  /** Turn-granularity completion signal: true once the last turn received turn_end.
+   *  The activity fold must stay open while this is false (turn still producing
+   *  output), even between text segments where isStreaming briefly flips false. */
+  turnEnded?: boolean;
   hiddenUserMessageCount?: number;
   cliApps?: CliAppInfo[];
   mcpPresets?: McpPresetInfo[];
@@ -25,10 +29,11 @@ export type DisplayUnit = TurnUnit;
 
 export function buildDisplayUnits(
   messages: UIMessage[],
-  isStreaming = false,
+  turnActive = false,
 ): DisplayUnit[] {
   return normalizeActivityTimeline(messages, {
-    preserveTrailingActivity: isStreaming,
+    preserveTrailingActivity: turnActive,
+    turnInFlight: turnActive,
   });
 }
 
@@ -53,6 +58,7 @@ export function ThreadMessages({
   messages,
   temporary = false,
   isStreaming = false,
+  turnEnded = true,
   hiddenUserMessageCount = 0,
   cliApps = [],
   mcpPresets = [],
@@ -64,15 +70,20 @@ export function ThreadMessages({
 }: ThreadMessagesProps) {
   const { t } = useTranslation();
   const messageListRef = useRef<HTMLDivElement>(null);
-  const units = useMemo(() => buildDisplayUnits(messages, isStreaming), [isStreaming, messages]);
+  /** Turn-granularity "in flight" flag: message-level streaming OR the turn
+   *  has not received turn_end yet.  Keeps trailing activity intact and the
+   *  activity fold open across gaps between text segments, so in-turn work
+   *  never collapses until the turn truly ends. */
+  const turnActive = isStreaming || !turnEnded;
+  const units = useMemo(() => buildDisplayUnits(messages, turnActive), [turnActive, messages]);
   const forkBoundaryAfterUnitIndex = useMemo(
     () => unitIndexAfterMessageCount(units, forkBoundaryMessageCount),
     [forkBoundaryMessageCount, units],
   );
   const forkFlags = useMemo(() => assistantForkFlags(units), [units]);
   const liveActivityClusterIndices = useMemo(
-    () => isStreaming ? currentActivityClusterIndices(units) : new Set<number>(),
-    [isStreaming, units],
+    () => turnActive ? currentActivityClusterIndices(units) : new Set<number>(),
+    [turnActive, units],
   );
   const unitKeys = useMemo(() => unitKeysForDisplay(units), [units]);
   let nextUserIndex = hiddenUserMessageCount;
@@ -291,14 +302,13 @@ function ForkBoundaryDivider({ label }: { label: string }) {
 
 function currentActivityClusterIndices(units: DisplayUnit[]): Set<number> {
   const indices = new Set<number>();
-  let markedCurrentActivity = false;
   for (let i = units.length - 1; i >= 0; i -= 1) {
     const unit = units[i];
     if (unit.type === "activity") {
-      if (!markedCurrentActivity) {
-        indices.add(i);
-        markedCurrentActivity = true;
-      }
+      // Every activity cluster in the current (still-running) turn stays
+      // expanded — not just the last one — so multi-segment turns never
+      // show earlier clusters collapsing mid-work.
+      indices.add(i);
       continue;
     }
     if (unit.message.role === "assistant" && unit.message.isStreaming) continue;
