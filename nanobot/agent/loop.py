@@ -845,6 +845,12 @@ class AgentLoop:
     @staticmethod
     def _skill_recall_source(ctx: TurnContext) -> str:
         """Classify the existing message origin for Skill auto-recall only."""
+        # Dream uses ``process_direct()`` for an internal, ephemeral turn.  That
+        # path deliberately creates a USER-kind message so the normal Runner can
+        # process it, but it must not make Dream prompt text eligible for
+        # automatic Skill recall.
+        if ctx.session_key.startswith("dream:"):
+            return "system"
         if ctx.kind is not TurnKind.USER:
             return "system"
         if local_trigger(ctx.msg.metadata) is not None:

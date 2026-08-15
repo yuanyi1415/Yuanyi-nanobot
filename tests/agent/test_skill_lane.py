@@ -64,6 +64,7 @@ def _user_turn(
     content: str,
     *,
     kind: TurnKind = TurnKind.USER,
+    session_key: str = "cli:c1",
     media: list[str] | None = None,
     metadata: dict[str, object] | None = None,
 ) -> TurnContext:
@@ -77,11 +78,11 @@ def _user_turn(
     )
     return TurnContext(
         msg=msg,
-        session_key="cli:c1",
+        session_key=session_key,
         turn_id="turn-1",
         runtime=loop.llm_runtime(),
         kind=kind,
-        delivery=loop.turn_delivery_factory.create(msg, "cli:c1"),
+        delivery=loop.turn_delivery_factory.create(msg, session_key),
     )
 
 
@@ -292,6 +293,29 @@ def test_cron_turn_never_runs_auto_recall(tmp_path: Path) -> None:
     assert decision.lane == "other"
     assert decision.source == "cron"
     assert decision.reason == "non_user_source"
+
+
+def test_dream_turn_never_runs_auto_recall(tmp_path: Path) -> None:
+    """Dream is an internal direct turn despite its USER-kind message."""
+    loop = _make_loop(tmp_path, observe_lane=True)
+
+    def _explode(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("Dream turns must not run automatic skill recall")
+
+    loop.context.skills.recall_skill_candidates = _explode  # type: ignore[method-assign]
+    decision = loop._decide_skill_lane(
+        _user_turn(
+            loop,
+            "internal memory consolidation prompt",
+            session_key="dream:20260815-201500",
+        )
+    )
+
+    assert decision.lane == "other"
+    assert decision.source == "system"
+    assert decision.reason == "non_user_source"
+    assert decision.candidates == ()
+    assert decision.bound == ()
 
 
 def test_local_trigger_retains_explicit_skill(tmp_path: Path) -> None:
