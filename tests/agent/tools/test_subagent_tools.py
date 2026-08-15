@@ -375,6 +375,47 @@ async def test_cancel_by_session_cancels_inline_subagent(tmp_path):
         await inline
     assert manager._running_tasks == {}
     assert manager._task_statuses == {}
+
+
+@pytest.mark.asyncio
+async def test_cancel_tasks_only_cancels_named_subagent(tmp_path):
+    from nanobot.agent.subagent import SubagentManager
+    from nanobot.bus.queue import MessageBus
+
+    manager = SubagentManager(
+        workspace=tmp_path,
+        bus=MessageBus(),
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+    )
+    entered = asyncio.Event()
+
+    async def fake_run(_spec):
+        entered.set()
+        await asyncio.Event().wait()
+
+    manager.runner.run = AsyncMock(side_effect=fake_run)
+    first = asyncio.create_task(manager.run_inline(
+        task="first",
+        task_id="orchestrated-1",
+        session_key="test:c1",
+        runtime=_runtime(MagicMock()),
+    ))
+    second = asyncio.create_task(manager.run_inline(
+        task="second",
+        task_id="orchestrated-2",
+        session_key="test:c1",
+        runtime=_runtime(MagicMock()),
+    ))
+    await asyncio.wait_for(entered.wait(), timeout=1.0)
+
+    assert await manager.cancel_tasks({"orchestrated-1"}) == 1
+    with pytest.raises(asyncio.CancelledError):
+        await first
+    assert not second.done()
+
+    second.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await second
     assert manager._session_tasks == {}
 
 

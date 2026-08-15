@@ -171,6 +171,7 @@ class SubagentManager:
         self._running_tasks: dict[str, asyncio.Task[str]] = {}
         self._task_statuses: dict[str, SubagentStatus] = {}
         self._session_tasks: dict[str, set[str]] = {}  # session_key -> {task_id, ...}
+        self._task_exec_owners: dict[str, str] = {}
 
     def runtime_statuses(self) -> Mapping[str, SubagentStatus]:
         """Return the observable task statuses used by runtime-control snapshots."""
@@ -281,13 +282,15 @@ class SubagentManager:
         workspace_scope: WorkspaceScope | None = None,
         *,
         runtime: LLMRuntime | None = None,
+        task_id: str | None = None,
+        execution_owner_key: str | None = None,
     ) -> str:
         """Spawn a subagent to execute a task in the background."""
         if runtime is None:
             runtime = self._compat_spawn_runtime()
         if temperature is not None:
             runtime = runtime.with_generation_overrides(temperature=temperature)
-        task_id = str(uuid.uuid4())[:8]
+        task_id = self._claim_task_id(task_id)
         display_label = label or task[:30] + ("..." if len(task) > 30 else "")
         origin: _SubagentOrigin = {
             "channel": origin_channel,
@@ -313,9 +316,12 @@ class SubagentManager:
                 runtime,
                 origin_message_id,
                 workspace_scope,
+                execution_owner_key=execution_owner_key,
             )
         )
         self._running_tasks[task_id] = bg_task
+        if execution_owner_key:
+            self._task_exec_owners[task_id] = execution_owner_key
         if session_key:
             self._session_tasks.setdefault(session_key, set()).add(task_id)
         self._publish_status_event(origin, task_id, display_label, "started")
@@ -323,6 +329,7 @@ class SubagentManager:
         def _cleanup(_: asyncio.Task[str]) -> None:
             self._running_tasks.pop(task_id, None)
             self._task_statuses.pop(task_id, None)
+            self._task_exec_owners.pop(task_id, None)
             if session_key and (ids := self._session_tasks.get(session_key)):
                 ids.discard(task_id)
                 if not ids:
@@ -345,13 +352,15 @@ class SubagentManager:
         workspace_scope: WorkspaceScope | None = None,
         *,
         runtime: LLMRuntime | None = None,
+        task_id: str | None = None,
+        execution_owner_key: str | None = None,
     ) -> str:
         """Run a subagent synchronously and return its result to the caller."""
         if runtime is None:
             runtime = self._compat_spawn_runtime()
         if temperature is not None:
             runtime = runtime.with_generation_overrides(temperature=temperature)
-        task_id = str(uuid.uuid4())[:8]
+        task_id = self._claim_task_id(task_id)
         display_label = label or task[:30] + ("..." if len(task) > 30 else "")
         origin: _SubagentOrigin = {
             "channel": origin_channel,
@@ -377,9 +386,12 @@ class SubagentManager:
                 origin_message_id,
                 workspace_scope,
                 announce=False,
+                execution_owner_key=execution_owner_key,
             )
         )
         self._running_tasks[task_id] = inline_task
+        if execution_owner_key:
+            self._task_exec_owners[task_id] = execution_owner_key
         if session_key:
             self._session_tasks.setdefault(session_key, set()).add(task_id)
         try:
@@ -387,9 +399,14 @@ class SubagentManager:
             if status.phase == "error" or status.stop_reason in {"error", "tool_error"}:
                 return ToolResult.error(result)
             return result
+        except asyncio.CancelledError:
+            if execution_owner_key:
+                await self._exec_session_manager.terminate_by_owner(execution_owner_key)
+            raise
         finally:
             self._running_tasks.pop(task_id, None)
             self._task_statuses.pop(task_id, None)
+            self._task_exec_owners.pop(task_id, None)
             if session_key and (ids := self._session_tasks.get(session_key)):
                 ids.discard(task_id)
                 if not ids:
@@ -407,6 +424,7 @@ class SubagentManager:
         workspace_scope: WorkspaceScope | None = None,
         *,
         announce: bool = True,
+        execution_owner_key: str | None = None,
     ) -> str:
         """Execute the subagent task and announce the result."""
         logger.info("Subagent [{}] starting task: {}", task_id, label)
@@ -439,7 +457,7 @@ class SubagentManager:
                 channel=origin["channel"],
                 chat_id=origin["chat_id"],
                 message_id=origin_message_id,
-                session_key=sess_key,
+                session_key=execution_owner_key or sess_key,
                 runtime=runtime,
             ))
             token = bind_workspace_scope(workspace_scope) if workspace_scope is not None else None
@@ -622,6 +640,39 @@ class SubagentManager:
             await asyncio.gather(*tasks, return_exceptions=True)
         await self._exec_session_manager.terminate_by_owner(session_key)
         return len(tasks)
+
+    async def cancel_tasks(self, task_ids: set[str]) -> int:
+        """Cancel only the named subagent tasks.
+
+        This intentionally does not terminate exec sessions by parent session:
+        a parent session can contain unrelated user-spawned work.  Callers
+        that need broad session teardown must use ``cancel_by_session``.
+        """
+        owners = {
+            owner
+            for task_id in task_ids
+            if (owner := self._task_exec_owners.get(task_id)) is not None
+        }
+        tasks = [
+            self._running_tasks[task_id]
+            for task_id in task_ids
+            if task_id in self._running_tasks and not self._running_tasks[task_id].done()
+        ]
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        for owner in owners:
+            await self._exec_session_manager.terminate_by_owner(owner)
+        return len(tasks)
+
+    def _claim_task_id(self, requested: str | None) -> str:
+        task_id = requested or str(uuid.uuid4())[:8]
+        if not task_id or len(task_id) > 120:
+            raise ValueError("subagent task_id must be a non-empty string up to 120 characters")
+        if task_id in self._running_tasks or task_id in self._task_statuses:
+            raise ValueError(f"subagent task_id is already active: {task_id}")
+        return task_id
 
     async def close(self) -> None:
         """Cancel running subagents and close their shared exec sessions."""

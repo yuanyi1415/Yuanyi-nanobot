@@ -277,7 +277,10 @@ class TaskFrameStore:
     def _replace(self, frames: tuple[TaskFrame, ...]) -> None:
         namespace = TaskFrameNamespace(task_frames=_trim_terminal_frames(frames))
         _validate_namespace(namespace)
-        serialized = _serialize_namespace(namespace)
+        serialized = _serialize_namespace(
+            namespace,
+            extensions=_namespace_extensions(self._metadata),
+        )
         if len(serialized.encode("utf-8")) > MAX_NAMESPACE_BYTES:
             raise TaskFrameValidationError("task-frame namespace exceeds its size limit")
         self._namespace = namespace
@@ -382,11 +385,32 @@ def _trim_terminal_frames(frames: tuple[TaskFrame, ...]) -> tuple[TaskFrame, ...
     return tuple(frame for frame in frames if frame.id not in discarded_ids)
 
 
-def _serialize_namespace(namespace: TaskFrameNamespace) -> str:
-    return json.dumps({
+def _namespace_extensions(metadata: Mapping[str, Any]) -> dict[str, Any]:
+    raw_namespace = metadata.get(ORCHESTRATION_METADATA_KEY)
+    if not isinstance(raw_namespace, dict):
+        return {}
+    return {
+        key: value
+        for key, value in cast(dict[str, Any], raw_namespace).items()
+        if key not in {"schema_version", TASK_FRAMES_METADATA_KEY}
+    }
+
+
+def _serialize_namespace(
+    namespace: TaskFrameNamespace,
+    *,
+    extensions: Mapping[str, Any] | None = None,
+) -> str:
+    payload: dict[str, Any] = {
         "schema_version": namespace.schema_version,
         TASK_FRAMES_METADATA_KEY: [_frame_to_metadata(frame) for frame in namespace.task_frames],
-    }, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+    }
+    if extensions:
+        payload.update(extensions)
+    try:
+        return json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+    except (TypeError, ValueError) as exc:
+        raise TaskFrameValidationError("task-frame namespace extensions must be JSON-safe") from exc
 
 
 def _frame_to_metadata(frame: TaskFrame) -> dict[str, object]:

@@ -123,6 +123,9 @@ class ExperimentalConfig(Base):
     skill_auto_bind_token_budget: int = Field(default=2000, ge=0)  # 绑定 skill 正文合计 token 上限（0=不限）
     observe_admission: bool = False  # 切片3：记录续办消息的准入判断（仅日志）
     admission_gate: bool = False  # 切片3：歧义续办表达先澄清，再进入 Runner
+    orchestration_enabled: bool = False  # V0：多目标任务的受控执行规划（默认完全关闭）
+    orchestration_max_parallel_workers: int = Field(default=2, ge=1, le=8)
+    orchestration_result_context_chars: int = Field(default=12_000, ge=1_000, le=48_000)
 
 
 class AgentDefaults(Base):

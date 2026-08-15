@@ -97,12 +97,19 @@ def test_blocked_or_legacy_active_task_frames_are_not_continuation_anchors(statu
 def test_experimental_config_defaults_and_aliases() -> None:
     assert Config().agents.defaults.experimental.admission_gate is False
     assert Config().agents.defaults.experimental.observe_admission is False
+    assert Config().agents.defaults.experimental.orchestration_enabled is False
     config = Config(agents={"defaults": {"experimental": {
         "admissionGate": True,
         "observeAdmission": True,
+        "orchestrationEnabled": True,
+        "orchestrationMaxParallelWorkers": 3,
+        "orchestrationResultContextChars": 6000,
     }}})
     assert config.agents.defaults.experimental.admission_gate is True
     assert config.agents.defaults.experimental.observe_admission is True
+    assert config.agents.defaults.experimental.orchestration_enabled is True
+    assert config.agents.defaults.experimental.orchestration_max_parallel_workers == 3
+    assert config.agents.defaults.experimental.orchestration_result_context_chars == 6000
 
 
 @pytest.mark.asyncio
