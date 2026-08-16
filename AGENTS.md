@@ -20,6 +20,11 @@ nanobot is a lightweight, open-source AI agent framework written in Python with 
   `gh auth status` as the authentication source of truth.
 - Before any merge, release-facing action, or action that could affect production, run the agreed
   regression checks and obtain the user's explicit approval.
+- In Codex-managed local E2E tests, `start-nanobot-dev.sh` may start a correct development Gateway
+  while its background Vite process exits with the launcher. Readiness therefore requires the
+  listening port, health endpoint, and exact process provenance; if port 8766 disappears, run Vite
+  in a foreground managed session with `NANOBOT_API_URL=http://127.0.0.1:8767`, then stop that exact
+  session and the verified development Gateway PID after testing.
 
 ## Development Commands
 
