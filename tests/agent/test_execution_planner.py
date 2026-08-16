@@ -108,7 +108,10 @@ async def test_planner_accepts_only_subagent_dag() -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("resource_claim", ["web search", "exclusive:"])
+@pytest.mark.parametrize(
+    "resource_claim",
+    ["web search", "exclusive:", "exclusive:web search", "exclusive:viewing context"],
+)
 async def test_planner_rejects_nonexclusive_resource_claims(resource_claim: str) -> None:
     provider = MagicMock()
     provider.chat_with_retry = AsyncMock(return_value=LLMResponse(content="""{
