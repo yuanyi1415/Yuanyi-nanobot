@@ -80,6 +80,9 @@ async def test_explicit_split_prefers_orchestration_without_forcing_it() -> None
     prompt = provider.chat_with_retry.await_args.args[0][0]["content"]
     assert "Prefer mode=orchestrate" in prompt
     assert "final comparison or synthesis" in prompt
+    assert "Independent read-only work uses [] by default" in prompt
+    assert "exclusive:<stable-resource-id>" in prompt
+    assert "web search or viewing context are not resource_claims" in prompt
 
 
 @pytest.mark.asyncio
@@ -102,6 +105,51 @@ async def test_planner_accepts_only_subagent_dag() -> None:
 
     assert decision.mode == "orchestrate"
     assert [node.id for node in decision.nodes] == ["facts", "risks"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("resource_claim", ["web search", "exclusive:"])
+async def test_planner_rejects_nonexclusive_resource_claims(resource_claim: str) -> None:
+    provider = MagicMock()
+    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(content="""{
+      "mode": "orchestrate",
+      "nodes": [
+        {"id": "facts", "actor": "subagent", "goal": "收集事实", "deliverable": "资料", "acceptance": ["两个来源"], "depends_on": [], "resource_claims": ["%s"]},
+        {"id": "risks", "actor": "subagent", "goal": "分析风险", "deliverable": "风险", "acceptance": ["列出风险"], "depends_on": [], "resource_claims": []}
+      ]
+    }""" % resource_claim))
+
+    decision = await plan_execution(
+        provider=provider,
+        runtime=_runtime(provider),
+        user_text="请分别调研两家供应商并比较价格与交付风险",
+        history=[],
+    )
+
+    assert decision.mode == "direct"
+    assert decision.reason == "planner_invalid_output"
+
+
+@pytest.mark.asyncio
+async def test_planner_accepts_specific_exclusive_resource_claims() -> None:
+    provider = MagicMock()
+    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(content="""{
+      "mode": "orchestrate",
+      "nodes": [
+        {"id": "write_a", "actor": "subagent", "goal": "写入报告", "deliverable": "报告", "acceptance": ["保存"], "depends_on": [], "resource_claims": ["exclusive:workspace:file:report.md"]},
+        {"id": "write_b", "actor": "subagent", "goal": "检查报告", "deliverable": "检查结果", "acceptance": ["完成检查"], "depends_on": [], "resource_claims": ["exclusive:workspace:file:report.md"]}
+      ]
+    }"""))
+
+    decision = await plan_execution(
+        provider=provider,
+        runtime=_runtime(provider),
+        user_text="请分别编写报告并检查报告的内容与格式",
+        history=[],
+    )
+
+    assert decision.mode == "orchestrate"
+    assert all(node.resource_claims == ("exclusive:workspace:file:report.md",) for node in decision.nodes)
 
 
 @pytest.mark.asyncio
