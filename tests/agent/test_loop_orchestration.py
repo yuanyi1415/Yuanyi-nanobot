@@ -126,3 +126,44 @@ async def test_cancelled_orchestration_stops_plan_and_cancels_frame(tmp_path) ->
     harness = session.metadata["orchestration.v1"]["harness_v0"]
     assert harness["plans"][0]["status"] == "stopped"
     assert session.metadata["orchestration.v1"]["task_frames"][0]["status"] == "cancelled"
+
+
+@pytest.mark.asyncio
+async def test_observe_only_orchestration_records_decision_without_state(tmp_path) -> None:
+    """Shadow mode runs the planner but creates no frame/plan/worker."""
+    planner = LLMResponse(content="""{
+      "mode": "orchestrate",
+      "nodes": [
+        {"id": "facts", "actor": "subagent", "goal": "收集事实", "deliverable": "资料", "acceptance": ["两个来源"], "depends_on": [], "resource_claims": []},
+        {"id": "risks", "actor": "subagent", "goal": "分析风险", "deliverable": "风险", "acceptance": ["列出风险"], "depends_on": [], "resource_claims": []}
+      ]
+    }""")
+    provider = _provider(planner, LLMResponse(content="正常 Runner 回答"))
+    loop = AgentLoop(
+        bus=MessageBus(),
+        provider=provider,
+        workspace=tmp_path,
+        model="test-model",
+        orchestration_observe=True,
+        orchestration_enabled=False,
+    )
+    loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)
+    loop.tools.get_definitions = MagicMock(return_value=[])
+    loop.subagents.run_inline = AsyncMock()
+
+    outbound = await loop.process_direct(
+        "请分别调研两家供应商并比较价格与交付风险",
+        session_key="webui:one",
+        channel="webui",
+        chat_id="one",
+    )
+
+    # Shadow mode: planner consumed one model call, but the turn still runs on
+    # the existing Runner (second model call) and no worker is spawned.
+    assert outbound is not None
+    assert outbound.content == "正常 Runner 回答"
+    assert loop.subagents.run_inline.await_count == 0
+    assert provider.chat_with_retry.await_count == 2
+    session = loop.sessions.get_or_create("webui:one")
+    assert "orchestration.v1" not in session.metadata
+    assert "task_frames" not in session.metadata

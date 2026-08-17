@@ -124,6 +124,7 @@ class ExperimentalConfig(Base):
     observe_admission: bool = False  # 切片3：记录续办消息的准入判断（仅日志）
     admission_gate: bool = False  # 切片3：歧义续办表达先澄清，再进入 Runner
     orchestration_enabled: bool = False  # V0：多目标任务的受控执行规划（默认完全关闭）
+    orchestration_observe: bool = False  # V0：影子模式——只记录 planner 决策，不创建 Frame/Worker（行为零变化）
     orchestration_max_parallel_workers: int = Field(default=2, ge=1, le=8)
     orchestration_result_context_chars: int = Field(default=12_000, ge=1_000, le=48_000)
 

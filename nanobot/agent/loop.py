@@ -337,6 +337,7 @@ class AgentLoop:
         observe_admission: bool = False,
         admission_gate: bool = False,
         orchestration_enabled: bool = False,
+        orchestration_observe: bool = False,
         orchestration_max_parallel_workers: int = 2,
         orchestration_result_context_chars: int = 12_000,
     ):
@@ -400,6 +401,7 @@ class AgentLoop:
         )
         self.provider_retry_mode = provider_retry_mode
         self.orchestration_enabled = orchestration_enabled
+        self.orchestration_observe = orchestration_observe
         self.orchestration_max_parallel_workers = orchestration_max_parallel_workers
         self.orchestration_result_context_chars = orchestration_result_context_chars
         self.tool_hint_max_length = (
@@ -581,6 +583,7 @@ class AgentLoop:
             observe_admission=defaults.experimental.observe_admission,
             admission_gate=defaults.experimental.admission_gate,
             orchestration_enabled=defaults.experimental.orchestration_enabled,
+            orchestration_observe=defaults.experimental.orchestration_observe,
             orchestration_max_parallel_workers=(
                 defaults.experimental.orchestration_max_parallel_workers
             ),
@@ -2181,7 +2184,7 @@ class AgentLoop:
         planner rejects/does not understand the request, no additional state or
         behavior is introduced.
         """
-        if not self.orchestration_enabled or ctx.kind is not TurnKind.USER:
+        if not (self.orchestration_enabled or self.orchestration_observe) or ctx.kind is not TurnKind.USER:
             return False
         session = ctx.require_session()
         runtime = ctx.require_runtime()
@@ -2191,6 +2194,25 @@ class AgentLoop:
             user_text=ctx.msg.content,
             history=ctx.history,
         )
+        if self.orchestration_observe and not self.orchestration_enabled:
+            # Shadow mode: record what the planner would do, then hand the turn
+            # back to the normal Runner without creating a frame, plan, receipt
+            # or worker. Behavior is identical to orchestration being disabled.
+            logger.bind(
+                channel="observability",
+                event="orchestration_observed",
+                mode=decision.mode,
+                reason=decision.reason,
+                node_count=len(decision.nodes),
+                node_actors=",".join(sorted({node.actor for node in decision.nodes})),
+            ).info(
+                "orchestration_observed mode={} reason={} node_count={} node_actors={}",
+                decision.mode,
+                decision.reason,
+                len(decision.nodes),
+                ",".join(sorted({node.actor for node in decision.nodes})),
+            )
+            return False
         logger.bind(channel="observability").info(
             "orchestration_planner action={} reason={}", decision.mode, decision.reason
         )
