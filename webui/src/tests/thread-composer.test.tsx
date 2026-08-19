@@ -342,6 +342,29 @@ function renderPresetComposer(variant: "thread" | "hero" = "thread") {
   };
 }
 
+/** Mock the button's position within the viewport for direction tests. */
+function mockButtonRect({ top, bottom }: { top: number; bottom: number }) {
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+    x: 0,
+    y: top,
+    top,
+    right: 300,
+    bottom,
+    left: 0,
+    width: 300,
+    height: bottom - top,
+    toJSON: () => ({}),
+  } as DOMRect);
+}
+
+/** Mock the rendered height of the dropdown menu. */
+function mockMenuHeight(height: number) {
+  Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
+    configurable: true,
+    get: () => height,
+  });
+}
+
 function pointerDown(badge: HTMLElement, pointerId = 7, clientY = 100, button = 0) {
   fireEvent.pointerDown(badge, {
     button,
@@ -577,19 +600,11 @@ describe("ThreadComposer", () => {
 
   it("flips the model menu upward when it would overflow the viewport bottom", () => {
     const { badge } = renderPresetComposer();
-    // Simulate the composer sitting near the bottom edge: the menu measured
-    // downward would extend past the viewport.
-    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
-      x: 0,
-      y: 880,
-      top: 880,
-      right: 300,
-      bottom: 940,
-      left: 0,
-      width: 300,
-      height: 60,
-      toJSON: () => ({}),
-    } as DOMRect);
+    // Simulate the composer sitting near the bottom edge: the button is at the
+    // bottom of a 768px viewport so a menu opening downward cannot fit, while
+    // there is plenty of room above.
+    mockButtonRect({ top: 880, bottom: 940 });
+    mockMenuHeight(320);
     fireEvent.click(badge.querySelector("button")!);
     const menu = screen.getByTestId("model-preset-menu");
     expect(menu.className).toContain("bottom-full");
@@ -598,10 +613,28 @@ describe("ThreadComposer", () => {
 
   it("keeps the model menu downward when it fits within the viewport", () => {
     const { badge } = renderPresetComposer();
+    // The composer sits in the middle of the viewport: there is enough room
+    // below the button, so the menu should keep opening downward.
+    mockButtonRect({ top: 200, bottom: 232 });
+    mockMenuHeight(320);
     fireEvent.click(badge.querySelector("button")!);
     const menu = screen.getByTestId("model-preset-menu");
     expect(menu.className).toContain("mt-1.5");
     expect(menu.className).toContain("slide-in-from-top-1");
+  });
+
+  it("picks the side with more room when the menu fits neither direction", () => {
+    const { badge } = renderPresetComposer();
+    // A very short viewport: neither side can fit the full menu, so the menu
+    // should open toward the side that has more space (here: upward).
+    vi.stubGlobal("innerHeight", 200);
+    mockButtonRect({ top: 100, bottom: 132 });
+    mockMenuHeight(320);
+    fireEvent.click(badge.querySelector("button")!);
+    const menu = screen.getByTestId("model-preset-menu");
+    expect(menu.className).toContain("bottom-full");
+    expect(menu.className).toContain("slide-in-from-bottom-1");
+    vi.unstubAllGlobals();
   });
 
   it("supports keyboard selection without a pointer gesture", () => {

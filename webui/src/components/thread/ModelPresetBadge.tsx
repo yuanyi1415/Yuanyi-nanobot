@@ -85,26 +85,32 @@ export function ModelPresetBadge({
 
   // Choose the popover direction based on the available viewport space.
   // The menu first renders downward; within the same frame (before paint)
-  // we measure it and flip upward when the bottom would overflow, e.g. in
-  // a thread with history where the composer sits at the window edge.
+  // we measure the button and menu, then flip upward when the bottom would
+  // overflow (e.g. in a thread with history the composer sits at the window
+  // edge). We always compute from the button position so the measurement is
+  // stable no matter which direction is currently active:
+  //   - downward: menu top = button bottom + 6px (mt-1.5)
+  //   - upward:   menu bottom = button top - 6px (mb-1.5), 8px margin on top
+  // Whichever side can fully fit the menu wins; when neither fits we pick the
+  // side with more room (the menu itself scrolls internally as a fallback).
   useLayoutEffect(() => {
     if (!menuOpen) {
       setOpenUp(false);
       return;
     }
     const menuEl = menuPopRef.current;
-    if (!menuEl) return;
+    const btnEl = buttonRef.current;
+    if (!menuEl || !btnEl) return;
     const computeDirection = () => {
-      const rect = menuEl.getBoundingClientRect();
+      const btnRect = btnEl.getBoundingClientRect();
+      const menuHeight = menuEl.offsetHeight;
       const viewportBottom = window.innerHeight - 8;
-      setOpenUp((prev) => {
-        if (prev) {
-          // Open upward: fall back to downward when the top edge is clipped.
-          return rect.top >= 8;
-        }
-        // Open downward: flip upward when the bottom would overflow
-        // and there is enough room above.
-        return rect.bottom > viewportBottom && rect.top > 8;
+      const spaceBelow = viewportBottom - btnRect.bottom - 6;
+      const spaceAbove = btnRect.top - 6 - 8;
+      setOpenUp(() => {
+        if (spaceBelow >= menuHeight) return false;
+        if (spaceAbove >= menuHeight) return true;
+        return spaceAbove > spaceBelow;
       });
     };
     computeDirection();
