@@ -42,6 +42,7 @@ import {
   ChannelValidationDetails,
 } from "@/components/settings/channels/ChannelSetupParts";
 import { ChannelInstancesPanel } from "@/components/settings/channels/ChannelInstancesPanel";
+import { ChannelModelPresetControl } from "@/components/settings/channels/ChannelModelPresetControl";
 import { Button } from "@/components/ui/button";
 import {
   configureChannel,
@@ -50,6 +51,7 @@ import {
 import { copyTextToClipboard } from "@/lib/clipboard";
 import type {
   ChannelValidationPayload,
+  ModelPresetOption,
   NanobotFeatureInfo,
   NanobotFeaturesPayload,
 } from "@/lib/types";
@@ -118,6 +120,7 @@ export function ChannelSetupPanel({
   showBrandLogos,
   onAction,
   onFeaturesUpdate,
+  modelOptions,
 }: {
   token: string;
   feature: NanobotFeatureInfo;
@@ -126,8 +129,27 @@ export function ChannelSetupPanel({
   showBrandLogos: boolean;
   onAction: (action: "enable" | "disable", name: string) => void;
   onFeaturesUpdate: (payload: NanobotFeaturesPayload) => void;
+  modelOptions: readonly ModelPresetOption[];
 }) {
   const { t, i18n } = useTranslation();
+  const { client } = useClient();
+  const [modelSaving, setModelSaving] = useState(false);
+  const saveDefaultModel = async (name: string) => {
+    setModelSaving(true);
+    try {
+      const payload = await configureChannel(
+        client,
+        feature.name,
+        { [`channels.${feature.name}.modelPreset`]: name },
+        { enable: feature.enabled },
+      );
+      if (payload.nanobot_features) onFeaturesUpdate(payload.nanobot_features);
+    } catch (err) {
+      console.error("Failed to save channel default model", err);
+    } finally {
+      setModelSaving(false);
+    }
+  };
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
   const displayName = localizedChannelDisplayName(feature, t);
   const [connectRequestId, setConnectRequestId] = useState(0);
@@ -135,7 +157,16 @@ export function ChannelSetupPanel({
   const PluginPanel = uiContribution?.Panel;
   if (PluginPanel) {
     return (
-      <PluginPanel
+      <>
+        <div className="mb-5 rounded-[14px] border border-border/45 bg-background/45 p-3">
+          <ChannelModelPresetControl
+            value={feature.model_preset}
+            options={modelOptions}
+            saving={modelSaving}
+            onSave={(name) => void saveDefaultModel(name)}
+          />
+        </div>
+        <PluginPanel
         token={token}
         feature={feature}
         actionKey={actionKey}
@@ -144,6 +175,7 @@ export function ChannelSetupPanel({
         onAction={onAction}
         onFeaturesUpdate={onFeaturesUpdate}
       />
+      </>
     );
   }
   if (feature.instances !== undefined) {
@@ -153,6 +185,7 @@ export function ChannelSetupPanel({
         showBrandLogos={showBrandLogos}
         chatAppsDocsUrl={chatAppsDocsUrl}
         onFeaturesUpdate={onFeaturesUpdate}
+        modelOptions={modelOptions}
       />
     );
   }
@@ -247,6 +280,9 @@ export function ChannelSetupPanel({
         connectRequestId={connectRequestId}
         ConnectFlow={uiContribution?.ConnectFlow}
         onFeaturesUpdate={onFeaturesUpdate}
+        modelOptions={modelOptions}
+        onSaveDefaultModel={(name) => void saveDefaultModel(name)}
+        modelSaving={modelSaving}
       />
     </aside>
   );
@@ -260,6 +296,9 @@ function ChannelSetupSurface({
   connectRequestId,
   ConnectFlow,
   onFeaturesUpdate,
+  modelOptions,
+  onSaveDefaultModel,
+  modelSaving,
 }: {
   token: string;
   feature: NanobotFeatureInfo;
@@ -268,6 +307,9 @@ function ChannelSetupSurface({
   connectRequestId: number;
   ConnectFlow?: ComponentType<ChannelPluginConnectFlowProps>;
   onFeaturesUpdate: (payload: NanobotFeaturesPayload) => void;
+  modelOptions: readonly ModelPresetOption[];
+  onSaveDefaultModel: (name: string) => void;
+  modelSaving: boolean;
 }) {
   const { client } = useClient();
   const { t } = useTranslation();
@@ -403,6 +445,14 @@ function ChannelSetupSurface({
         if (mode === "credentials") void saveCredentialSettings();
       }}
     >
+      <section className="rounded-[14px] border border-border/45 bg-background/45 p-3">
+        <ChannelModelPresetControl
+          value={feature.model_preset}
+          options={modelOptions}
+          saving={modelSaving}
+          onSave={onSaveDefaultModel}
+        />
+      </section>
       <section>
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="text-[13px] font-semibold text-foreground">

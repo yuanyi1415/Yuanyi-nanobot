@@ -32,6 +32,7 @@ from nanobot.channels.contracts import (
     channel_runtime_name,
     resolve_channel_action_target,
 )
+from nanobot.channels.model_selection import channel_model_preset_from_config
 from nanobot.channels.registry import channel_default_enabled
 from nanobot.config.schema import Config
 from nanobot.utils.restart import (
@@ -160,6 +161,7 @@ class ChannelManager:
         section: Any,
         *,
         runtime_name: str | None = None,
+        default_model_preset: str | None = None,
     ) -> BaseChannel:
         kwargs: dict[str, Any] = {}
         if cls.name == "websocket":
@@ -207,6 +209,7 @@ class ChannelManager:
         channel.show_reasoning = self._resolve_bool_override(
             section, "show_reasoning", self.config.channels.show_reasoning,
         )
+        channel.default_model_preset = default_model_preset
         return channel
 
     def _init_channels(self) -> None:
@@ -271,6 +274,9 @@ class ChannelManager:
                             cls,
                             spec.config,
                             runtime_name=runtime_name,
+                            default_model_preset=channel_model_preset_from_config(
+                                spec.config
+                            ),
                         ),
                     )
                     for runtime_name, spec in runtime_specs
@@ -515,6 +521,9 @@ class ChannelManager:
                         cls,
                         spec.config,
                         runtime_name=runtime_name,
+                        default_model_preset=channel_model_preset_from_config(
+                            spec.config
+                        ),
                     ),
                 )
                 for runtime_name, spec in runtime_specs

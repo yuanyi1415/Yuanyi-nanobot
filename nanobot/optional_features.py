@@ -28,6 +28,7 @@ from nanobot.channels.contracts import (
     resolve_channel_action_target,
     stringify_channel_value,
 )
+from nanobot.channels.model_selection import channel_model_preset_from_config
 from nanobot.channels.registry import channel_default_enabled
 from nanobot.config.schema import Config
 
@@ -496,8 +497,9 @@ def optional_features_payload(
                 "ready": ready,
                 "status": status,
             })
+            channel_section = getattr(config.channels, name, None)
             config_values, configured_fields = _channel_config_snapshot(
-                getattr(config.channels, name, None),
+                channel_section,
                 name,
                 setup_spec,
             )
@@ -511,7 +513,22 @@ def optional_features_payload(
                 setup_spec=setup_spec,
             )
             if instances is not None:
-                feature["instances"] = instances
+                feature["instances"] = [
+                    {
+                        **instance,
+                        "model_preset": (
+                            instance.get("model_preset")
+                            if instance.get("model_preset") in config.model_presets
+                            else None
+                        ),
+                    }
+                    for instance in instances
+                ]
+            else:
+                preset = channel_model_preset_from_config(channel_section)
+                feature["model_preset"] = (
+                    preset if preset in config.model_presets else None
+                )
         except Exception as exc:
             logger.warning("Could not inspect {} channel configuration: {}", name, exc)
             feature.update({

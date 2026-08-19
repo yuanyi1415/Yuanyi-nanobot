@@ -1,23 +1,14 @@
-import {
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  useState,
-  type KeyboardEvent,
-  type PointerEvent,
-} from "react";
-import { CircleHelp, Sparkles } from "lucide-react";
+import { useLayoutEffect, useRef, useState } from "react";
+import { CircleHelp, ChevronDown, Sparkles, Check, RotateCcw } from "lucide-react";
 
 import { useLogoFallback } from "@/hooks/useLogoFallback";
 import { inferProviderFromModelName, providerBrand } from "@/lib/provider-brand";
+import type { ModelPresetOption as SharedModelPresetOption } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
-export interface ModelPresetOption {
-  name: string;
-  label: string;
-  model?: string | null;
-  provider?: string | null;
-}
+/** The thread accepts partial catalog rows so it remains easy to use in tests and hosts. */
+export type ModelPresetOption = Pick<SharedModelPresetOption, "name" | "label"> &
+  Partial<Omit<SharedModelPresetOption, "name" | "label">>;
 
 interface ModelPresetBadgeProps {
   label: string;
@@ -31,54 +22,8 @@ interface ModelPresetBadgeProps {
   fallbackModelName?: string | null;
   isHero: boolean;
   onClick?: () => void;
-}
-
-interface PresetGesture {
-  active: boolean;
-  baseIndex: number;
-  latestY: number;
-  pointerId: number;
-  startY: number;
-  step: number;
-  target: HTMLElement;
-  timer: ReturnType<typeof setTimeout> | null;
-}
-
-interface PresetMotion {
-  index: number;
-  remainder: number;
-  settling: boolean;
-}
-
-const LONG_PRESS_MS = 400;
-const PRESS_SLOP_PX = 8;
-const PILL_GAP_PX = 4;
-const PILL_OFFSETS = [-2, -1, 0, 1, 2] as const;
-const HANDOFF_THRESHOLD = 0.56;
-const DOCK_MAX_SCALE = 1.08;
-const DOCK_RADIUS = 1.5;
-const SETTLE_MS = 180;
-
-function wrapIndex(index: number, length: number): number {
-  return ((index % length) + length) % length;
-}
-
-function dockScale(distanceFromFocus: number): number {
-  const distance = Math.abs(distanceFromFocus);
-  if (distance >= DOCK_RADIUS) return 1;
-  const influence = (1 + Math.cos(Math.PI * distance / DOCK_RADIUS)) / 2;
-  return 1 + (DOCK_MAX_SCALE - 1) * influence;
-}
-
-function stepWithHysteresis(raw: number, current: number): number {
-  let next = current;
-  while (raw > next + HANDOFF_THRESHOLD) next += 1;
-  while (raw < next - HANDOFF_THRESHOLD) next -= 1;
-  return next;
-}
-
-function preventTouchScroll(event: TouchEvent) {
-  if (event.cancelable) event.preventDefault();
+  /** True when the displayed effective model comes from this Session's override. */
+  modelPresetIsOverride?: boolean;
 }
 
 export function ModelPresetBadge({
@@ -93,335 +38,286 @@ export function ModelPresetBadge({
   fallbackModelName,
   isHero,
   onClick,
+  modelPresetIsOverride = false,
 }: ModelPresetBadgeProps) {
-  const activeName = modelPreset?.trim() || "";
-  const listedIndex = modelPresets.findIndex((preset) => preset.name === activeName);
-  const activePreset: ModelPresetOption = {
-    ...(listedIndex >= 0 ? modelPresets[listedIndex] : undefined),
-    name: activeName,
-    label: label || modelPresets[listedIndex]?.label || activeName,
-    model: modelDetail ?? modelPresets[listedIndex]?.model,
-    provider: provider || modelPresets[listedIndex]?.provider,
+  const activeName = modelPreset?.trim() || "default";
+  const selectOptions: SharedModelPresetOption[] = [
+    {
+      name: "default",
+      label: "Use global default",
+      model: null,
+      provider: null,
+      providerLabel: null,
+      isDefault: true,
+      disabled: false,
+    },
+    ...modelPresets
+      .filter((preset) => preset.name !== "default")
+      .map((preset) => ({
+        name: preset.name,
+        label: preset.label || preset.name,
+        model: preset.model ?? null,
+        provider: preset.provider ?? null,
+        providerLabel: preset.providerLabel ?? null,
+        isDefault: false,
+        disabled: preset.disabled ?? false,
+      })),
+  ];
+  const hasSelection = Boolean(onPresetChange) && selectOptions.length > 1;
+  const interactive = Boolean(onClick) && !hasSelection;
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+
+  // Close menu when clicking outside
+  useLayoutEffect(() => {
+    if (!menuOpen) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [menuOpen]);
+
+  const handleChange = (name: string) => {
+    onPresetChange?.(name);
+    setMenuOpen(false);
   };
-  const presets = !activeName
-    ? modelPresets
-    : listedIndex < 0
-      ? [activePreset, ...modelPresets]
-      : modelPresets.map((preset, index) => index === listedIndex ? activePreset : preset);
-  const interactive = Boolean(onClick);
-  const canSwitch = !interactive && Boolean(onPresetChange) && activeName !== "" && presets.length > 1;
-  const currentIndex = Math.max(0, presets.findIndex((preset) => preset.name === activeName));
-  const pillHeight = isHero ? 32 : 36;
-  const pillStride = pillHeight + PILL_GAP_PX;
-  const [motion, setMotion] = useState<PresetMotion | null>(null);
-  const gestureRef = useRef<PresetGesture | null>(null);
 
-  function clearGesture() {
-    const gesture = gestureRef.current;
-    if (gesture?.timer) clearTimeout(gesture.timer);
-    if (gesture?.active) gesture.target.removeEventListener("touchmove", preventTouchScroll);
-    gestureRef.current = null;
-  }
-
-  useEffect(() => {
-    if (!canSwitch) {
-      clearGesture();
-      setMotion(null);
-    }
-    return clearGesture;
-  }, [canSwitch]);
-
-  useEffect(() => {
-    if (!motion?.settling) return;
-    const timer = setTimeout(() => setMotion(null), SETTLE_MS + 80);
-    return () => clearTimeout(timer);
-  }, [motion?.settling]);
-
-  function updateMotion(gesture: PresetGesture, clientY: number) {
-    const raw = -(clientY - gesture.startY) / pillStride;
-    gesture.step = stepWithHysteresis(raw, gesture.step);
-    setMotion({ index: gesture.baseIndex + gesture.step, remainder: raw - gesture.step, settling: false });
-  }
-
-  function handlePointerDown(event: PointerEvent<HTMLElement>) {
-    if (!canSwitch || gestureRef.current || motion || event.isPrimary === false) return;
-    if (event.pointerType === "mouse" && event.button !== 0) return;
-    const gesture: PresetGesture = {
-      active: false,
-      baseIndex: currentIndex,
-      latestY: event.clientY,
-      pointerId: event.pointerId,
-      startY: event.clientY,
-      step: 0,
-      target: event.currentTarget,
-      timer: null,
-    };
-    gesture.timer = setTimeout(() => {
-      if (gestureRef.current !== gesture) return;
-      gesture.active = true;
-      updateMotion(gesture, gesture.latestY);
-      gesture.target.addEventListener("touchmove", preventTouchScroll, { passive: false });
-      try {
-        gesture.target.setPointerCapture(gesture.pointerId);
-      } catch { /* The pointer may already have ended. */ }
-    }, LONG_PRESS_MS);
-    gestureRef.current = gesture;
-  }
-
-  function handlePointerMove(event: PointerEvent<HTMLElement>) {
-    const gesture = gestureRef.current;
-    if (!gesture || gesture.pointerId !== event.pointerId) return;
-    gesture.latestY = event.clientY;
-    if (!gesture.active) {
-      if (Math.abs(event.clientY - gesture.startY) > PRESS_SLOP_PX) clearGesture();
-      return;
-    }
-    event.preventDefault();
-    updateMotion(gesture, event.clientY);
-  }
-
-  function finishGesture(event: PointerEvent<HTMLElement>, commit: boolean) {
-    const gesture = gestureRef.current;
-    if (!gesture || gesture.pointerId !== event.pointerId) return;
-    clearGesture();
-    if (event.currentTarget.hasPointerCapture?.(gesture.pointerId)) {
-      event.currentTarget.releasePointerCapture?.(gesture.pointerId);
-    }
-    if (!commit || !gesture.active) {
-      setMotion(null);
-      return;
-    }
-    const selected = presets[wrapIndex(gesture.baseIndex + gesture.step, presets.length)];
-    setMotion((current) => current && { ...current, remainder: 0, settling: true });
-    if (selected && selected.name !== activeName) onPresetChange?.(selected.name);
-  }
-
-  function handleKeyDown(event: KeyboardEvent<HTMLElement>) {
-    if (!canSwitch) return;
-    const targetByKey: Record<string, number> = {
-      ArrowUp: currentIndex - 1,
-      ArrowDown: currentIndex + 1,
-      Home: 0,
-      End: presets.length - 1,
-    };
-    const target = targetByKey[event.key];
-    if (target === undefined) return;
-    event.preventDefault();
-    const next = presets[wrapIndex(target, presets.length)];
-    if (next?.name !== activeName) onPresetChange?.(next.name);
-  }
-
-  const previewIndex = wrapIndex(motion?.index ?? currentIndex, presets.length);
-  const previewPreset = presets[previewIndex];
-  const Container = interactive || canSwitch ? "button" : "span";
-  const trackOffset = motion ? -pillStride * (2 + motion.remainder) : 0;
-
-  return (
-    <Container
-      data-switching={motion ? "true" : undefined}
-      data-settling={motion?.settling ? "true" : undefined}
-      aria-label={label}
-      aria-orientation={canSwitch ? "vertical" : undefined}
-      aria-valuemax={canSwitch ? presets.length - 1 : undefined}
-      aria-valuemin={canSwitch ? 0 : undefined}
-      aria-valuenow={canSwitch ? previewIndex : undefined}
-      aria-valuetext={canSwitch ? previewPreset?.label || label : undefined}
-      role={canSwitch ? "spinbutton" : undefined}
-      type={interactive || canSwitch ? "button" : undefined}
-      onClick={interactive ? onClick : undefined}
-      onKeyDown={handleKeyDown}
-      onPointerDown={handlePointerDown}
-      onPointerMove={handlePointerMove}
-      onPointerLeave={(event) => {
-        const gesture = gestureRef.current;
-        if (gesture && gesture.pointerId === event.pointerId && !gesture.active) clearGesture();
-      }}
-      onPointerUp={(event) => finishGesture(event, true)}
-      onPointerCancel={(event) => finishGesture(event, false)}
-      onLostPointerCapture={(event) => finishGesture(event, false)}
-      onContextMenu={(event) => {
-        if (gestureRef.current?.active) event.preventDefault();
-      }}
-      onDragStart={(event) => event.preventDefault()}
-      style={{ touchAction: canSwitch ? "manipulation" : undefined }}
-      className={cn(
-        "thread-composer-model-badge group/model-badge relative inline-flex w-fit min-w-0 max-w-[min(18rem,44vw)] justify-end appearance-none border-0 bg-transparent p-0 shadow-none",
-        interactive && "cursor-pointer",
-        canSwitch && "cursor-grab select-none focus-visible:outline-none",
-        motion && "z-10 cursor-grabbing",
-        isHero ? "h-8" : "h-9",
-      )}
+  const badge = (
+    <span
+      data-testid="composer-model-badge"
+      data-model-selection={modelPresetIsOverride ? "session-override" : "global-default"}
+      data-selectable={hasSelection ? "true" : undefined}
+      className="relative inline-flex w-fit"
+      ref={menuRef}
     >
-      <PresetPill
-        className={motion && "invisible"}
-        label={label}
-        modelDetail={modelDetail}
-        provider={provider}
-        providerLabel={providerLabel}
-        needsSetup={needsSetup}
-        fallbackModelName={fallbackModelName}
-        isHero={isHero}
-      />
-      {motion ? (
-        <span
-          data-testid="composer-model-pill-viewport"
-          className={cn(
-            "composer-model-pill-viewport pointer-events-none absolute right-0 w-max max-w-[calc(44vw+0.5rem)] overflow-hidden bg-transparent pl-2 sm:max-w-[18.5rem]",
-            isHero ? "-bottom-2.5 -top-2.5" : "-bottom-3 -top-3",
-          )}
-          aria-hidden
-        >
-          <span
-            data-testid="composer-model-pill-track"
-            data-settling={motion.settling ? "true" : undefined}
-            className="composer-model-pill-track ml-auto flex w-max max-w-full flex-col items-end gap-1 will-change-transform"
-            onTransitionEnd={(event) => {
-              if (motion.settling && event.currentTarget === event.target) setMotion(null);
-            }}
-            style={{
-              paddingTop: isHero ? "10px" : "12px",
-              transform: `translate3d(0, ${trackOffset}px, 0)`,
-            }}
-          >
-            {PILL_OFFSETS.map((offset) => {
-              const virtualIndex = motion.index + offset;
-              const preset = presets[wrapIndex(virtualIndex, presets.length)];
-              const scale = motion.settling ? 1 : dockScale(offset - motion.remainder);
-              return (
-                <PresetPill
-                  key={virtualIndex}
-                  label={preset.label || preset.name}
-                  modelDetail={preset.model}
-                  provider={preset.provider}
-                  isHero={isHero}
-                  offset={offset}
-                  scale={scale}
-                />
-              );
-            })}
-          </span>
+      <button
+        ref={buttonRef}
+        type="button"
+        data-fallback={fallbackModelName ? "true" : undefined}
+        disabled={!hasSelection && !interactive}
+        onClick={hasSelection ? () => setMenuOpen(!menuOpen) : onClick}
+        className={cn(
+          "composer-model-badge group/badge flex items-center gap-1.5 rounded-full transition-all duration-150",
+          "border border-border/60 bg-background/80 backdrop-blur-sm",
+          "hover:border-border hover:bg-background hover:shadow-sm",
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:ring-offset-1",
+          isHero ? "h-7 pl-1.5 pr-2 text-xs" : "h-8 pl-2 pr-2.5 text-[13px]",
+          hasSelection && "cursor-pointer",
+          !hasSelection && !interactive && "cursor-default",
+          needsSetup && "border-amber-400/40 bg-amber-50/50 hover:bg-amber-50/80 dark:border-amber-500/30 dark:bg-amber-950/20",
+          modelPresetIsOverride && !needsSetup && "border-primary/20 bg-primary/5",
+        )}
+        title={fallbackModelName || [...new Set([label, modelDetail, providerLabel].filter(Boolean))].join(" · ")}
+      >
+        {/* Provider icon */}
+        <PresetIcon
+          provider={provider}
+          needsSetup={needsSetup}
+          label={label}
+          modelDetail={modelDetail}
+          isHero={isHero}
+        />
+        {/* Label */}
+        <span className={cn(
+          "font-medium text-foreground/80 group-hover/badge:text-foreground transition-colors",
+          "max-w-[140px] truncate",
+        )}>
+          {label}
         </span>
-      ) : null}
-    </Container>
+        {/* Override indicator */}
+        {modelPresetIsOverride && (
+          <span
+            className="h-1.5 w-1.5 rounded-full bg-primary shrink-0"
+            title="Session override active"
+          />
+        )}
+        {/* Dropdown chevron */}
+        {hasSelection && (
+          <ChevronDown
+            className={cn(
+              "h-3 w-3 text-foreground/40 transition-transform duration-200 shrink-0",
+              menuOpen && "rotate-180 text-foreground/60",
+            )}
+          />
+        )}
+      </button>
+
+      {/* Dropdown menu */}
+      {hasSelection && menuOpen && (
+        <>
+          {/* Backdrop for click-outside */}
+          <div
+            className="fixed inset-0 z-40"
+            onClick={() => setMenuOpen(false)}
+          />
+          {/* Menu */}
+          <div
+            className={cn(
+              "absolute z-50 mt-1.5 min-w-[220px] max-w-[280px]",
+              "overflow-hidden rounded-xl border border-border/50",
+              "bg-popover/95 backdrop-blur-md shadow-lg shadow-black/5",
+              "animate-in fade-in-0 zoom-in-95 slide-in-from-top-1 duration-150",
+              "right-0",
+            )}
+            data-testid="model-preset-menu"
+          >
+            {/* Header */}
+            <div className="px-3 py-2 border-b border-border/30">
+              <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground/70">
+                Switch model
+              </span>
+            </div>
+            {/* Options */}
+            <div className="p-1 max-h-[300px] overflow-y-auto">
+              {selectOptions.map((option) => {
+                const isSelected = option.name === activeName;
+                const brand = option.provider ? providerBrand(option.provider) : null;
+                const isDefaultOption = option.name === "default";
+                return (
+                  <button
+                    key={option.name}
+                    type="button"
+                    disabled={option.disabled}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleChange(option.name);
+                    }}
+                    className={cn(
+                      "flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm transition-all duration-100",
+                      "hover:bg-accent hover:text-accent-foreground",
+                      "disabled:cursor-not-allowed disabled:opacity-40",
+                      "focus-visible:outline-none focus-visible:bg-accent",
+                      isSelected && "bg-accent/60",
+                    )}
+                  >
+                    {/* Icon */}
+                    <span className="flex h-6 w-6 shrink-0 items-center justify-center">
+                      {isSelected ? (
+                        <span className="flex h-5 w-5 items-center justify-center rounded-full bg-primary/10">
+                          <Check className="h-3 w-3 text-primary" strokeWidth={2.5} />
+                        </span>
+                      ) : isDefaultOption ? (
+                        <span className="flex h-5 w-5 items-center justify-center rounded-full bg-muted">
+                          <RotateCcw className="h-3 w-3 text-muted-foreground" />
+                        </span>
+                      ) : brand ? (
+                        <span
+                          className="grid h-5 w-5 place-items-center rounded-full text-[8px] font-bold text-white shadow-sm"
+                          style={{ backgroundColor: brand.color }}
+                        >
+                          {brand.initials.slice(0, 2)}
+                        </span>
+                      ) : (
+                        <span className="flex h-5 w-5 items-center justify-center rounded-full bg-muted">
+                          <Sparkles className="h-3 w-3 text-muted-foreground/60" />
+                        </span>
+                      )}
+                    </span>
+                    {/* Text */}
+                    <span className="flex flex-col items-start min-w-0 flex-1">
+                      <span className={cn(
+                        "truncate w-full",
+                        isSelected ? "font-medium text-foreground" : "text-foreground/90",
+                      )}>
+                        {option.label}
+                      </span>
+                      {option.providerLabel && !isDefaultOption && (
+                        <span className="text-[11px] text-muted-foreground truncate w-full">
+                          {option.providerLabel}
+                        </span>
+                      )}
+                      {isDefaultOption && (
+                        <span className="text-[11px] text-muted-foreground/70">
+                          Follow global setting
+                        </span>
+                      )}
+                    </span>
+                    {/* Override badge */}
+                    {isSelected && modelPresetIsOverride && !isDefaultOption && (
+                      <span className="shrink-0 rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary">
+                        Session
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </>
+      )}
+    </span>
   );
+
+  if (interactive) {
+    return badge;
+  }
+  return badge;
 }
 
-function PresetPill({
-  className,
+function PresetIcon({
+  provider,
+  needsSetup = false,
   label,
   modelDetail,
-  provider,
-  providerLabel,
-  needsSetup = false,
-  fallbackModelName,
   isHero,
-  offset,
-  scale,
 }: {
-  className?: string | false | null;
+  provider?: string | null;
+  needsSetup?: boolean;
   label: string;
   modelDetail?: string | null;
-  provider?: string | null;
-  providerLabel?: string | null;
-  needsSetup?: boolean;
-  fallbackModelName?: string | null;
   isHero: boolean;
-  offset?: number;
-  scale?: number;
 }) {
-  const labelRef = useRef<HTMLSpanElement | null>(null);
-  const [labelOverflows, setLabelOverflows] = useState(false);
   const inferredProvider = needsSetup
     ? null
     : provider || inferProviderFromModelName(modelDetail || label);
   const brand = providerBrand(inferredProvider);
   const { logoUrl, onLogoError, onLogoLoad } = useLogoFallback(brand?.logoUrls);
-  const title = [...new Set([label, modelDetail, providerLabel].filter(Boolean))].join(" · ");
-  const logoTestId = offset !== undefined
-    ? undefined
-    : needsSetup
-      ? "composer-model-setup-icon"
-      : `composer-model-logo${inferredProvider ? `-${inferredProvider}` : ""}`;
+  const size = isHero ? "h-4 w-4" : "h-[18px] w-[18px]";
 
-  useLayoutEffect(() => {
-    const node = labelRef.current;
-    if (!node) return;
-    const update = () => setLabelOverflows(node.scrollWidth > node.clientWidth + 1);
-    update();
-    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(update);
-    observer?.observe(node);
-    return () => observer?.disconnect();
-  }, [label]);
+  if (needsSetup) {
+    return (
+      <span data-testid="composer-model-setup-icon" className={cn("grid shrink-0 place-items-center rounded-full bg-amber-100 dark:bg-amber-900/30", size)}>
+        <CircleHelp className={cn("text-amber-700 dark:text-amber-300", isHero ? "h-3 w-3" : "h-3.5 w-3.5")} strokeWidth={1.8} />
+      </span>
+    );
+  }
+
+  if (logoUrl) {
+    return (
+      <span data-testid={inferredProvider ? `composer-model-logo-${inferredProvider}` : "composer-model-logo"} className={cn("grid shrink-0 place-items-center overflow-hidden rounded-full border border-border/40 bg-background", size)}>
+        <img
+          src={logoUrl}
+          alt=""
+          draggable={false}
+          decoding="async"
+          loading="lazy"
+          className={cn("object-contain", isHero ? "h-3 w-3" : "h-3.5 w-3.5")}
+          onLoad={onLogoLoad}
+          onError={onLogoError}
+        />
+      </span>
+    );
+  }
+
+  if (brand) {
+    return (
+      <span
+        data-testid={inferredProvider ? `composer-model-logo-${inferredProvider}` : "composer-model-logo"}
+        className={cn("grid shrink-0 place-items-center rounded-full text-white font-bold shadow-sm", size, isHero ? "text-[7px]" : "text-[8px]")}
+        style={{ backgroundColor: brand.color }}
+      >
+        {brand.initials.slice(0, 2)}
+      </span>
+    );
+  }
 
   return (
-    <span
-      data-fallback={fallbackModelName ? "true" : undefined}
-      data-preset-offset={offset}
-      title={fallbackModelName || title || undefined}
-      className={cn(
-        "composer-model-badge composer-model-pill inline-flex h-full w-fit max-w-full min-w-0 shrink-0 items-center rounded-full border border-border/55 bg-card font-medium text-foreground/70",
-        offset === undefined && "shadow-[0_2px_8px_rgba(15,23,42,0.045)]",
-        "transition-[color,background-color,border-color,transform] duration-150 ease-out group-focus-visible/model-badge:ring-2 group-focus-visible/model-badge:ring-ring/45",
-        needsSetup && "border-amber-500/35 bg-amber-50/70 text-amber-900 dark:bg-amber-500/10 dark:text-amber-200",
-        isHero ? "gap-1.5 px-2.5 text-[12px]" : "gap-2 px-3 text-[12.5px]",
-        offset !== undefined && "composer-model-pill-dock",
-        className,
-      )}
-      style={scale === undefined ? undefined : {
-        height: `${isHero ? 32 : 36}px`,
-        transform: `scale(${scale.toFixed(4)})`,
-        zIndex: Math.round(scale * 100),
-      }}
-    >
-      <span
-        data-testid={logoTestId}
-        className={cn(
-          "grid shrink-0 place-items-center overflow-hidden",
-          needsSetup ? "text-amber-800 dark:text-amber-200" : "rounded-full border bg-background",
-          isHero ? "h-4 w-4" : "h-[18px] w-[18px]",
-        )}
-        style={{
-          borderColor: !needsSetup && brand ? `${brand.color}28` : undefined,
-          boxShadow: !needsSetup && brand ? `inset 0 0 0 1px ${brand.color}18` : undefined,
-        }}
-        aria-hidden
-      >
-        {needsSetup ? (
-          <CircleHelp className={cn(isHero ? "h-3 w-3" : "h-3.5 w-3.5")} strokeWidth={1.8} />
-        ) : logoUrl ? (
-          <img
-            src={logoUrl}
-            alt=""
-            draggable={false}
-            decoding="async"
-            loading="lazy"
-            className={cn("object-contain", isHero ? "h-3 w-3" : "h-3.5 w-3.5")}
-            onLoad={onLogoLoad}
-            onError={onLogoError}
-          />
-        ) : brand ? (
-          <span
-            className={cn(
-              "grid h-full w-full place-items-center rounded-full text-white",
-              isHero ? "text-[7.5px]" : "text-[8px]",
-            )}
-            style={{ backgroundColor: brand.color }}
-          >
-            {brand.initials.slice(0, 2)}
-          </span>
-        ) : (
-          <Sparkles className="h-3 w-3 text-muted-foreground/65" />
-        )}
-      </span>
-      <span
-        ref={labelRef}
-        className={cn(
-          "thread-composer-model-label min-w-0 overflow-hidden whitespace-nowrap text-center",
-          labelOverflows && "thread-composer-model-label-fade",
-        )}
-      >
-        {label}
-      </span>
+    <span data-testid="composer-model-logo" className={cn("grid shrink-0 place-items-center rounded-full bg-muted", size)}>
+      <Sparkles className={cn("text-muted-foreground/60", isHero ? "h-3 w-3" : "h-3.5 w-3.5")} />
     </span>
   );
 }

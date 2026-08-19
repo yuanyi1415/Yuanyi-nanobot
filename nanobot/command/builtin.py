@@ -14,12 +14,17 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 from nanobot import __version__
 from nanobot.bus.events import OutboundMessage
 from nanobot.command.router import CommandContext, CommandRouter, normalize_command_text
+from nanobot.session.model_selection import (
+    ModelSelectionSource,
+    clear_session_model_preset,
+)
 from nanobot.utils.helpers import build_status_content
 from nanobot.utils.restart import set_restart_notice_to_env
 from nanobot.utils.workspace_prompts import initialize_workspace_prompt
 
 if TYPE_CHECKING:
     from nanobot.agent.loop import AgentLoop
+    from nanobot.bus.events import InboundMessage
     from nanobot.session.manager import Session
     from nanobot.utils.gitstore import CommitInfo
 
@@ -339,10 +344,18 @@ def _command_error_message(exc: Exception) -> str:
     return str(exc.args[0]) if isinstance(exc, KeyError) and exc.args else str(exc)
 
 
-def _model_command_status(loop: AgentLoop, session: Session) -> str:
+def _model_selection_source_label(source: ModelSelectionSource) -> str:
+    return {
+        ModelSelectionSource.SESSION: "Session",
+        ModelSelectionSource.CHANNEL: "Channel",
+        ModelSelectionSource.GLOBAL: "Global",
+    }[source]
+
+
+def _model_command_status(loop: AgentLoop, session: Session, msg: InboundMessage) -> str:
     names = _model_preset_names(loop)
     try:
-        runtime = loop.runtime_for_session(session, recover_removed=False)
+        runtime, decision = loop.model_selection_for_turn(session, msg)
     except (KeyError, ValueError) as exc:
         return "\n".join([
             "## Model",
@@ -351,10 +364,13 @@ def _model_command_status(loop: AgentLoop, session: Session) -> str:
             "- Switch with `/model <preset>`.",
         ])
     active = runtime.model_preset or "default"
+    channel_default = decision.channel_default or "(none)"
     return "\n".join([
         "## Model",
         f"- Current model: `{runtime.model}`",
-        f"- Current preset: `{active}`",
+        f"- Current effective preset: `{active}`",
+        f"- Selection source: {_model_selection_source_label(decision.source)}",
+        f"- Channel default: `{channel_default}`",
         f"- Available presets: {_format_preset_names(names)}",
     ])
 
@@ -365,12 +381,12 @@ async def cmd_model(ctx: CommandContext) -> OutboundMessage:
     args = ctx.args.strip()
     metadata = {**dict(ctx.msg.metadata or {}), "render_as": "text"}
 
+    session = ctx.session or loop.sessions.get_or_create(ctx.key)
     if not args:
-        session = ctx.session or loop.sessions.get_or_create(ctx.key)
         return OutboundMessage(
             channel=ctx.msg.channel,
             chat_id=ctx.msg.chat_id,
-            content=_model_command_status(loop, session),
+            content=_model_command_status(loop, session, ctx.msg),
             metadata=metadata,
         )
 
@@ -384,6 +400,34 @@ async def cmd_model(ctx: CommandContext) -> OutboundMessage:
         )
 
     name = parts[0]
+    if name.lower() == "default":
+        if clear_session_model_preset(session.metadata):
+            loop.sessions.save(session)
+        try:
+            runtime, decision = loop.model_selection_for_turn(session, ctx.msg)
+        except (KeyError, ValueError) as exc:
+            return OutboundMessage(
+                channel=ctx.msg.channel,
+                chat_id=ctx.msg.chat_id,
+                content=(
+                    f"Session override cleared, but effective model could not be resolved: "
+                    f"{_command_error_message(exc)}"
+                ),
+                metadata=metadata,
+            )
+        active = runtime.model_preset or "default"
+        return OutboundMessage(
+            channel=ctx.msg.channel,
+            chat_id=ctx.msg.chat_id,
+            content="\n".join([
+                "Session override cleared.",
+                f"- Effective preset: `{active}`",
+                f"- Selection source: {_model_selection_source_label(decision.source)}",
+                f"- Model: `{runtime.model}`",
+            ]),
+            metadata=metadata,
+        )
+
     try:
         runtime = loop.set_session_model_preset(ctx.key, name)
     except (KeyError, ValueError) as exc:

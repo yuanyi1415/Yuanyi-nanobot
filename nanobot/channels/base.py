@@ -16,6 +16,7 @@ from nanobot.pairing import (
     generate_code,
     is_approved,
 )
+from nanobot.session.model_selection import CHANNEL_MODEL_PRESET_MESSAGE_META
 
 
 class BaseChannel(ABC):
@@ -44,6 +45,11 @@ class BaseChannel(ABC):
         self.logger = logger.bind(channel=self.name)
         self.bus = bus
         self._running = False
+        # Host-owned Channel Instance Default preset, bound by ChannelManager
+        # from the raw instance config. Injected into inbound message metadata
+        # so the AgentLoop can resolve it without knowing the channel type or
+        # instance id. ``None`` inherits the global default.
+        self.default_model_preset: str | None = None
 
     async def transcribe_audio(self, file_path: str | Path) -> str:
         """Transcribe an audio file via Whisper (OpenAI or Groq). Returns empty string on failure."""
@@ -303,9 +309,11 @@ class BaseChannel(ABC):
                 )
             return
 
-        meta = metadata or {}
+        meta = dict(metadata or {})
         if self.supports_streaming:
-            meta = {**meta, "_wants_stream": True}
+            meta["_wants_stream"] = True
+        if self.default_model_preset:
+            meta[CHANNEL_MODEL_PRESET_MESSAGE_META] = self.default_model_preset
 
         msg = InboundMessage(
             channel=self.name,

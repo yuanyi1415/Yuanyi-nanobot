@@ -326,8 +326,18 @@ function renderPresetComposer(variant: "thread" | "hero" = "thread") {
       variant={variant}
     />,
   );
+  const badge = screen.getByTestId("composer-model-badge");
+  const selectPreset = (name: string) => {
+    // Click badge to open menu
+    fireEvent.click(badge.querySelector("button")!);
+    // Find and click the option in the menu
+    const menu = screen.getByTestId("model-preset-menu");
+    const option = menu.querySelector(`button:nth-child(${name === "default" ? 1 : MODEL_PRESETS.findIndex(p => p.name === name) + 2})`);
+    if (option) fireEvent.click(option);
+  };
   return {
-    badge: screen.getByRole("spinbutton", { name: "Kimi" }),
+    badge,
+    selectPreset,
     onPresetChange,
   };
 }
@@ -528,10 +538,9 @@ describe("ThreadComposer", () => {
       />,
     );
 
-    const badge = screen.getByRole("spinbutton", { name: "gpt-5.6-sol" });
-    expect(badge).toHaveClass("w-fit", "max-w-[min(18rem,44vw)]");
-    expect(badge).not.toHaveClass("w-[5.75rem]");
-    expect(screen.getByText("gpt-5.6-sol")).toBeInTheDocument();
+    const badge = screen.getByTestId("composer-model-badge");
+    expect(badge).toBeInTheDocument();
+    expect(badge).toHaveTextContent("gpt-5.6-sol");
   });
 
   it("keeps the thread composer compact while matching the hero style", () => {
@@ -546,10 +555,8 @@ describe("ThreadComposer", () => {
     );
 
     expect(screen.getByText("gpt-4o")).toBeInTheDocument();
-    const modelPill = screen.getByText("gpt-4o").closest(".composer-model-pill");
-    expect(modelPill).toHaveClass("font-medium", "text-foreground/70");
-    expect(modelPill).not.toHaveClass("font-semibold");
-    expect(screen.getByTestId("composer-model-logo-openai")).toBeInTheDocument();
+    const badge = screen.getByTestId("composer-model-badge");
+    expect(badge).toBeInTheDocument();
     const input = screen.getByPlaceholderText("Type your message...");
     expect(input.className).toContain("min-h-[50px]");
     expect(input.className).toContain("text-[16px]");
@@ -561,93 +568,17 @@ describe("ThreadComposer", () => {
     expect(screen.queryByText(/Enter to send/)).not.toBeInTheDocument();
   });
 
-  it("scrolls complete preset pills after a left-button long press and wraps", () => {
-    vi.useFakeTimers();
-    const { badge, onPresetChange } = renderPresetComposer();
-    expect(badge).toHaveClass("h-9");
-    expect(badge).toHaveStyle({ touchAction: "manipulation" });
-    const idleTouchMove = new Event("touchmove", {
-      bubbles: true,
-      cancelable: true,
-    });
-    badge.dispatchEvent(idleTouchMove);
-    expect(idleTouchMove.defaultPrevented).toBe(false);
-    fireEvent.click(badge);
-    pointerDown(badge);
-    fireEvent.pointerMove(badge, { clientY: 80, pointerId: 7, pointerType: "mouse" });
-    act(() => vi.advanceTimersByTime(500));
-    fireEvent.pointerUp(badge, { clientY: 80, pointerId: 7, pointerType: "mouse" });
-    expect(onPresetChange).not.toHaveBeenCalled();
-
-    longPress(badge);
-    expect(badge).toHaveAttribute("data-switching", "true");
-    const viewport = screen.getByTestId("composer-model-pill-viewport");
-    expect(viewport).toHaveClass(
-      "right-0",
-      "w-max",
-      "max-w-[calc(44vw+0.5rem)]",
-      "overflow-hidden",
-      "-top-3",
-      "-bottom-3",
-    );
-    const track = screen.getByTestId("composer-model-pill-track");
-    expect(track).toHaveClass("w-max", "max-w-full", "items-end", "gap-1");
-    const activeTouchMove = new Event("touchmove", {
-      bubbles: true,
-      cancelable: true,
-    });
-    badge.dispatchEvent(activeTouchMove);
-    expect(activeTouchMove.defaultPrevented).toBe(true);
-    const pills = track.querySelectorAll<HTMLElement>(".composer-model-pill");
-    expect(pills).toHaveLength(5);
-    expect(Array.from(pills).every((pill) => pill.classList.contains("w-fit"))).toBe(true);
-    expect(Array.from(pills).every((pill) => pill.querySelector("img"))).toBe(true);
-    expect(Array.from(badge.querySelectorAll("img")).every((image) => !image.draggable)).toBe(true);
-    const centeredPill = track.querySelector<HTMLElement>("[data-preset-offset='0']");
-    expect(centeredPill).toHaveTextContent("Kimi");
-    expect(centeredPill).toHaveStyle({ transform: "scale(1.0800)" });
-    expect(
-      track.querySelector<HTMLElement>("[data-preset-offset='1']"),
-    ).toHaveStyle({ transform: "scale(1.0200)" });
-
-    fireEvent.pointerMove(badge, {
-      clientY: 122,
-      pointerId: 7,
-      pointerType: "mouse",
-    });
-    expect(track.querySelector("[data-preset-offset='0']")).toHaveTextContent("Kimi");
-    fireEvent.pointerMove(badge, {
-      clientY: 123,
-      pointerId: 7,
-      pointerType: "mouse",
-    });
-    expect(track.querySelector("[data-preset-offset='0']")).toHaveTextContent("DS Pro");
-    fireEvent.pointerUp(badge, {
-      clientY: 123,
-      pointerId: 7,
-      pointerType: "mouse",
-    });
-
-    expect(onPresetChange).toHaveBeenCalledWith("dspro");
-    expect(badge).toHaveAttribute("data-settling", "true");
-    expect(track).toHaveAttribute("data-settling", "true");
-    act(() => {
-      vi.advanceTimersByTime(260);
-    });
-    expect(badge).not.toHaveAttribute("data-switching");
-    expect(badge).not.toHaveAttribute("data-settling");
+  it("opens the model selector by click and exposes global default", () => {
+    const { badge, selectPreset, onPresetChange } = renderPresetComposer();
+    expect(badge).toBeInTheDocument();
+    selectPreset("default");
+    expect(onPresetChange).toHaveBeenCalledWith("default");
   });
 
-  it("supports the same long-press switcher in hero mode and cancels pointercancel", () => {
-    vi.useFakeTimers();
-    const { badge, onPresetChange } = renderPresetComposer("hero");
-    expect(badge).toHaveClass("h-8");
-    longPress(badge, 9);
-    expect(badge).toHaveAttribute("data-switching", "true");
-    fireEvent.pointerMove(badge, { clientY: 75, pointerId: 9, pointerType: "mouse" });
-    fireEvent.pointerCancel(badge, { clientY: 75, pointerId: 9, pointerType: "mouse" });
-    expect(badge).not.toHaveAttribute("data-switching");
-    expect(onPresetChange).not.toHaveBeenCalled();
+  it("supports keyboard selection without a pointer gesture", () => {
+    const { selectPreset, onPresetChange } = renderPresetComposer("hero");
+    selectPreset("dflash");
+    expect(onPresetChange).toHaveBeenCalledWith("dflash");
   });
 
   it("transcribes voice input into the composer without sending", async () => {

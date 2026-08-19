@@ -7,7 +7,6 @@ import { FilePreviewPanel } from "@/components/FilePreviewPanel";
 import { PromptNavigator } from "@/components/thread/PromptNavigator";
 import { SessionInfoPopover } from "@/components/thread/SessionInfoPopover";
 import { ThreadComposer } from "@/components/thread/ThreadComposer";
-import type { ModelPresetOption } from "@/components/thread/ModelPresetBadge";
 import { ThreadHeader } from "@/components/thread/ThreadHeader";
 import { StreamErrorNotice } from "@/components/thread/StreamErrorNotice";
 import { ThreadViewport, type ThreadViewportHandle } from "@/components/thread/ThreadViewport";
@@ -33,6 +32,10 @@ import {
 } from "@/lib/mcp-preset-events";
 import type { CanonicalRunSnapshot, StreamError } from "@/lib/nanobot-client";
 import { inferProviderFromModelName, providerDisplayLabel } from "@/lib/provider-brand";
+import {
+  GLOBAL_DEFAULT_NAME,
+  modelPresetOptionsFromSettings,
+} from "@/lib/model-presets";
 import type {
   ChatSummary,
   SettingsPayload,
@@ -391,29 +394,7 @@ function toModelBadgeInfo(
   };
 }
 
-function modelPresetOptionsFromSettings(
-  settings: SettingsPayload | null,
-): ModelPresetOption[] {
-  if (!settings) return [];
-  const order = new Map(
-    (settings.model_call_order ?? []).map((name, index) => [name.trim(), index]),
-  );
-  return settings.model_presets
-    .filter((preset) => !preset.is_default && preset.name.trim())
-    .sort((a, b) => (
-      (order.get(a.name.trim()) ?? Number.POSITIVE_INFINITY)
-      - (order.get(b.name.trim()) ?? Number.POSITIVE_INFINITY)
-    ))
-    .map((preset) => {
-      const name = preset.name.trim();
-      return {
-        name,
-        label: preset.label?.trim() || name,
-        model: preset.model,
-        provider: preset.resolved_provider || preset.provider,
-      };
-    });
-}
+
 
 const HERO_GREETING_KEYS = [
   "thread.empty.greetings.workOn",
@@ -899,25 +880,29 @@ export function ThreadShell({
 
   const showHeroComposer = displayMessages.length === 0 && !loading;
   const wasShowingHeroComposerRef = useRef(showHeroComposer);
-  const sessionModelPreset = session?.modelPreset?.trim() || null;
+  const persistedSessionModelPreset = session?.modelPreset?.trim() || null;
+  const sessionModelPreset = persistedSessionModelPreset === GLOBAL_DEFAULT_NAME
+    ? null
+    : persistedSessionModelPreset;
   const [localModelPreset, setLocalModelPreset] = useState<string | null>(null);
   useEffect(() => {
     setLocalModelPreset(null);
   }, [session?.key, sessionModelPreset]);
-  const activeModelPreset = (
-    localModelPreset
-    || sessionModelPreset
-    || settings?.agent.model_preset
-    || "default"
-  );
+  const activeModelPreset = localModelPreset || sessionModelPreset || GLOBAL_DEFAULT_NAME;
+  const modelPresetIsOverride = Boolean(localModelPreset || sessionModelPreset);
   const handleModelPresetChange = useCallback((name: string) => {
-    setLocalModelPreset(name);
+    const normalizedName = name.trim() || GLOBAL_DEFAULT_NAME;
+    const isGlobalDefault = normalizedName === GLOBAL_DEFAULT_NAME;
+    setLocalModelPreset(isGlobalDefault ? null : normalizedName);
     if (chatId) {
-      void client.sendSystemCommand(chatId, `/model ${name}`).catch(() => {});
+      void client.sendSystemCommand(
+        chatId,
+        isGlobalDefault ? "/model default" : `/model ${normalizedName}`,
+      ).catch(() => {});
     }
   }, [chatId, client]);
   const modelPresetOptions = useMemo(
-    () => modelPresetOptionsFromSettings(settings),
+    () => settings ? modelPresetOptionsFromSettings(settings) : [],
     [settings],
   );
   const availableSlashCommands = useMemo(
@@ -1476,6 +1461,7 @@ export function ThreadShell({
           modelNeedsSetup={modelBadge.needsSetup}
           fallbackModelName={fallbackModelName}
           onModelBadgeClick={modelBadge.needsSetup ? onOpenModelSettings : undefined}
+          modelPresetIsOverride={modelPresetIsOverride}
           variant={showHeroComposer ? "hero" : "thread"}
           slashCommands={availableSlashCommands}
           cliApps={cliApps}
@@ -1520,6 +1506,7 @@ export function ThreadShell({
           modelNeedsSetup={modelBadge.needsSetup}
           fallbackModelName={fallbackModelName}
           onModelBadgeClick={modelBadge.needsSetup ? onOpenModelSettings : undefined}
+          modelPresetIsOverride={modelPresetIsOverride}
           variant="hero"
           slashCommands={availableSlashCommands}
           cliApps={cliApps}

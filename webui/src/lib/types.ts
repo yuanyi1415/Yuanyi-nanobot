@@ -488,6 +488,16 @@ export interface ProviderOAuthPending {
 export type ProviderOAuthLoginResult = SettingsPayload | ProviderOAuthAuthorizationRequired;
 export type ProviderOAuthCompletionResult = SettingsPayload | ProviderOAuthPending;
 
+export interface ModelPresetOption {
+  name: string;
+  label: string;
+  model?: string | null;
+  provider?: string | null;
+  providerLabel?: string | null;
+  isDefault: boolean;
+  disabled: boolean;
+}
+
 export interface SettingsPayload {
   surface?: RuntimeSurface;
   runtime_surface?: RuntimeSurface;
@@ -840,6 +850,8 @@ export interface NanobotFeatureInfo {
   configured_fields?: string[];
   setup?: ChannelSetupContract;
   instances?: NanobotChannelInstanceInfo[];
+  /** Host-level default preset; null means inherit the global default. */
+  model_preset?: string | null;
   installed: boolean;
   ready: boolean;
   status: "enabled" | "missing_dependency" | "not_enabled" | string;
@@ -873,6 +885,8 @@ export interface NanobotChannelInstanceInfo {
   configured: boolean;
   config_values: Record<string, string>;
   configured_fields: string[];
+  /** Host-level default preset; null means inherit the global default. */
+  model_preset?: string | null;
 }
 
 export type ChannelRuntimeStatus = "running" | "starting" | "failed" | "stopped" | string;

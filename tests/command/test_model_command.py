@@ -16,6 +16,7 @@ from nanobot.command.builtin import (
 )
 from nanobot.command.router import CommandContext, CommandRouter
 from nanobot.config.schema import ModelPresetConfig
+from nanobot.session.keys import UNIFIED_SESSION_KEY
 from nanobot.session.model_selection import (
     SESSION_MODEL_PRESET_METADATA_KEY,
     model_preset_from_metadata,
@@ -81,7 +82,9 @@ async def test_model_command_lists_current_and_available_presets(tmp_path) -> No
     out = await cmd_model(_ctx(loop, "/model"))
 
     assert "Current model: `base-model`" in out.content
-    assert "Current preset: `default`" in out.content
+    assert "Current effective preset: `default`" in out.content
+    assert "Selection source: Global" in out.content
+    assert "Channel default: `(none)`" in out.content
     assert "Available presets: `default`, `fast`" in out.content
     assert "`fast`" in out.content
     assert out.metadata == {"render_as": "text"}
@@ -113,8 +116,10 @@ async def test_model_command_switches_back_to_default(tmp_path) -> None:
 
     out = await cmd_model(_ctx(loop, "/model default", args="default"))
 
-    assert "Switched model preset to `default`." in out.content
-    assert _saved_model_preset(loop) == "default"
+    assert "Session override cleared." in out.content
+    assert "Effective preset: `default`" in out.content
+    assert "Selection source: Global" in out.content
+    assert _saved_model_preset(loop) is None
     assert loop.model_preset is None
     assert loop.model == "base-model"
     assert loop.context_window_tokens == 1000
@@ -193,7 +198,8 @@ async def test_model_command_does_not_change_another_session(tmp_path) -> None:
         CommandContext(msg=other, session=None, key=other.session_key, raw="/model", loop=loop)
     )
 
-    assert "Current preset: `default`" in out.content
+    assert "Current effective preset: `default`" in out.content
+    assert "Selection source: Global" in out.content
     assert _saved_model_preset(loop) == "fast"
 
 
@@ -208,12 +214,79 @@ async def test_model_command_reports_and_recovers_removed_session_preset(tmp_pat
     switched = await loop.process_direct("/model default", session_key="cli:direct")
 
     assert status is not None
-    assert "model_preset 'removed' not found" in status.content
+    assert "Current effective preset: `default`" in status.content
+    assert "Selection source: Global" in status.content
     assert "Available presets: `default`, `fast`" in status.content
-    assert "Switch with `/model <preset>`" in status.content
     assert switched is not None
-    assert "Switched model preset to `default`." in switched.content
-    assert _saved_model_preset(loop) == "default"
+    assert "Session override cleared." in switched.content
+    assert _saved_model_preset(loop) is None
+
+
+@pytest.mark.asyncio
+async def test_model_status_reports_channel_default_and_source(tmp_path) -> None:
+    loop = _make_loop(tmp_path)
+    ctx = _ctx(loop, "/model")
+    ctx.msg.metadata = {"_nanobot_channel_model_preset": "fast"}
+
+    out = await cmd_model(ctx)
+
+    assert "Current effective preset: `fast`" in out.content
+    assert "Selection source: Channel" in out.content
+    assert "Channel default: `fast`" in out.content
+
+
+@pytest.mark.asyncio
+async def test_model_default_clears_override_and_restores_channel(tmp_path) -> None:
+    loop = _make_loop(tmp_path)
+    ctx = _ctx(loop, "/model fast", args="fast")
+    await cmd_model(ctx)
+    ctx.msg.content = "/model default"
+    ctx.args = "default"
+    ctx.msg.metadata = {"_nanobot_channel_model_preset": "fast"}
+
+    out = await cmd_model(ctx)
+
+    assert "Session override cleared." in out.content
+    assert "Effective preset: `fast`" in out.content
+    assert "Selection source: Channel" in out.content
+    assert _saved_model_preset(loop) is None
+
+
+@pytest.mark.asyncio
+async def test_model_invalid_preset_does_not_modify_existing_override(tmp_path) -> None:
+    loop = _make_loop(tmp_path)
+    await cmd_model(_ctx(loop, "/model fast", args="fast"))
+
+    out = await cmd_model(_ctx(loop, "/model missing", args="missing"))
+
+    assert "Available presets: `default`, `fast`" in out.content
+    assert _saved_model_preset(loop) == "fast"
+
+
+@pytest.mark.asyncio
+async def test_model_command_preserves_unified_session_sharing(tmp_path) -> None:
+    loop = _make_loop(tmp_path)
+    first = InboundMessage(channel="discord", sender_id="user", chat_id="one", content="/model fast")
+    await cmd_model(CommandContext(
+        msg=first,
+        session=None,
+        key=UNIFIED_SESSION_KEY,
+        raw="/model fast",
+        args="fast",
+        loop=loop,
+    ))
+
+    second = InboundMessage(channel="telegram", sender_id="user", chat_id="two", content="/model")
+    out = await cmd_model(CommandContext(
+        msg=second,
+        session=None,
+        key=UNIFIED_SESSION_KEY,
+        raw="/model",
+        loop=loop,
+    ))
+
+    assert "Current effective preset: `fast`" in out.content
+    assert "Selection source: Session" in out.content
 
 
 def test_model_command_in_help_and_palette() -> None:

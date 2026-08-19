@@ -112,6 +112,7 @@ import {
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Textarea } from "@/components/ui/textarea";
 import { isLoopbackHost } from "@/lib/network";
+import { modelPresetOptionsFromSettings } from "@/lib/model-presets";
 import {
   checkVersion,
   completeProviderOAuth,
@@ -732,6 +733,10 @@ export function SettingsView({
   const [cliApps, setCliApps] = useState<CliAppsPayload | null>(null);
   const [nanobotFeatures, setNanobotFeatures] = useState<NanobotFeaturesPayload | null>(null);
   const featureCatalog = nanobotFeatures?.features ?? [];
+  const modelPresetOptions = useMemo(
+    () => settings ? modelPresetOptionsFromSettings(settings) : [],
+    [settings],
+  );
   const [mcpPresets, setMcpPresets] = useState<McpPresetsPayload | null>(null);
   const [automations, setAutomations] = useState<AutomationsPayload | null>(null);
   const [loading, setLoading] = useState(() => initialSettings === null);
@@ -2244,6 +2249,7 @@ export function SettingsView({
           <ChannelsSettings
             token={token}
             nanobotFeatures={nanobotFeatures}
+            modelOptions={modelPresetOptions}
             loading={nanobotFeaturesLoading}
             query={channelsQuery}
             actionKey={nanobotFeatureAction}
@@ -7093,6 +7099,7 @@ function RestartRequiredNotice({
 function ChannelsSettings({
   token,
   nanobotFeatures,
+  modelOptions,
   loading,
   query,
   actionKey,
@@ -7109,6 +7116,7 @@ function ChannelsSettings({
 }: {
   token: string;
   nanobotFeatures: NanobotFeaturesPayload | null;
+  modelOptions: ReturnType<typeof modelPresetOptionsFromSettings>;
   loading: boolean;
   query: string;
   actionKey: string | null;
@@ -7198,6 +7206,7 @@ function ChannelsSettings({
       showBrandLogos={showBrandLogos}
       onAction={onAction}
       onFeaturesUpdate={onFeaturesUpdate}
+      modelOptions={modelOptions}
     />
   ) : null;
   const showingCompactDetail = !splitLayout && compactDetailOpen && selectedChannel !== null;

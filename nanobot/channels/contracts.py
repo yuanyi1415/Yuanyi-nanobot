@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Literal, TypeGuard, cast
 
+from nanobot.channels.model_selection import channel_model_preset_from_config
+
 if TYPE_CHECKING:
     from nanobot.channels.plugin import ChannelPlugin
 
@@ -605,6 +607,7 @@ def _channel_feature_instance(
         "name": name,
         "display_name": display_name,
         "avatar_url": avatar_url,
+        "model_preset": channel_model_preset_from_config(config),
         "enabled": enabled,
         "configured": bool(setup_spec and setup_spec.is_configured(config)),
         "config_values": config_values,

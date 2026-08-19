@@ -28,6 +28,7 @@ from nanobot.channels.contracts import (
     channel_instance_config,
     channel_update_instance_config,
 )
+from nanobot.channels.model_selection import CHANNEL_MODEL_PRESET_CONFIG_FIELD
 from nanobot.channels.registry import load_channel_plugin
 from nanobot.channels.validation import validate_channel_config
 from nanobot.config.schema import Config
@@ -970,7 +971,12 @@ class WebUISettingsRouter:
             payload = await asyncio.to_thread(
                 validate_channel_config,
                 name,
-                self._parse_channel_values(request),
+                {
+                    key: value
+                    for key, value in self._parse_channel_values(request).items()
+                    if (key.rsplit(".", 1)[-1] if key else key)
+                    != CHANNEL_MODEL_PRESET_CONFIG_FIELD
+                },
                 instance_id=instance_id,
             )
         except WebUISettingsError as e:
@@ -1024,6 +1030,19 @@ class WebUISettingsRouter:
                         "channel settings payload contains an invalid key"
                     )
                 field = raw_key[len(prefix):] if raw_key.startswith(prefix) else raw_key
+                if field == CHANNEL_MODEL_PRESET_CONFIG_FIELD:
+                    preset = raw_value.strip() if isinstance(raw_value, str) else ""
+                    if not preset or preset == "default":
+                        channel_config.pop(CHANNEL_MODEL_PRESET_CONFIG_FIELD, None)
+                    elif preset not in config.model_presets:
+                        raise WebUISettingsError(
+                            f"'{raw_key}' must reference an existing model preset",
+                            status=400,
+                        )
+                    else:
+                        channel_config[CHANNEL_MODEL_PRESET_CONFIG_FIELD] = preset
+                    saved.append(raw_key)
+                    continue
                 value_type = field_types.get(field)
                 if value_type is None:
                     raise WebUISettingsError(f"'{raw_key}' cannot be configured from WebUI")

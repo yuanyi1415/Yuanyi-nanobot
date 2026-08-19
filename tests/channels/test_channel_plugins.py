@@ -2310,6 +2310,7 @@ def test_optional_features_payload_lists_feishu_instances(monkeypatch):
             "name": "nanobot",
             "display_name": "Voraflare Bot",
             "avatar_url": "https://example.com/bot.png",
+            "model_preset": None,
             "enabled": True,
             "configured": True,
             "config_values": {
@@ -2331,6 +2332,7 @@ def test_optional_features_payload_lists_feishu_instances(monkeypatch):
             "name": "Product bot",
             "display_name": "Product bot",
             "avatar_url": "",
+            "model_preset": None,
             "enabled": False,
             "configured": True,
             "config_values": {

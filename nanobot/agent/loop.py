@@ -88,6 +88,10 @@ from nanobot.session.manager import (
 )
 from nanobot.session.model_selection import (
     SESSION_MODEL_PRESET_METADATA_KEY,
+    ModelSelectionDecision,
+    ModelSelectionSource,
+    channel_model_preset_from_message_metadata,
+    clear_session_model_preset,
     model_preset_from_metadata,
 )
 from nanobot.triggers.local_session_turns import local_trigger
@@ -625,6 +629,71 @@ class AgentLoop:
             session.metadata.pop(SESSION_MODEL_PRESET_METADATA_KEY, None)
             self.sessions.save(session)
             return self.llm_runtime()
+
+    def model_selection_for_turn(
+        self,
+        session: Session,
+        msg: InboundMessage,
+    ) -> tuple[LLMRuntime, ModelSelectionDecision]:
+        """Resolve the three-layer model selection for one turn.
+
+        Priority: Session Override > Channel Instance Default > Global Default.
+
+        A Session Override whose preset was removed from the catalog is cleared
+        from session metadata (with a warning) and resolution falls through to
+        the channel/global layers. A Channel Instance Default whose preset was
+        removed is ignored (with a warning) and resolution falls to the global
+        default; the turn never fails because of stale selection state.
+
+        ``runtime_for_session()`` keeps its Session > Global semantics for the
+        paths that do not carry an inbound message (SDK clients, commands,
+        auto-compact); this method is the Turn-aware entry used by the loop's
+        BUILD stage.
+        """
+        channel_default = channel_model_preset_from_message_metadata(msg.metadata)
+
+        name = model_preset_from_metadata(session.metadata)
+        if name is not None:
+            try:
+                runtime = self.runtime_resolver.resolve_preset(name)
+            except KeyError:
+                logger.warning(
+                    "Session '{}' references removed model preset '{}'; "
+                    "clearing override and falling back to channel/global default",
+                    session.key,
+                    name,
+                )
+                clear_session_model_preset(session.metadata)
+                self.sessions.save(session)
+            else:
+                return runtime, ModelSelectionDecision(
+                    preset=name,
+                    source=ModelSelectionSource.SESSION,
+                    channel_default=channel_default,
+                )
+
+        if channel_default is not None:
+            try:
+                runtime = self.runtime_resolver.resolve_preset(channel_default)
+            except KeyError:
+                logger.warning(
+                    "Channel default model preset '{}' no longer exists; "
+                    "falling back to global default",
+                    channel_default,
+                )
+            else:
+                return runtime, ModelSelectionDecision(
+                    preset=channel_default,
+                    source=ModelSelectionSource.CHANNEL,
+                    channel_default=channel_default,
+                )
+
+        runtime = self.llm_runtime()
+        return runtime, ModelSelectionDecision(
+            preset=runtime.model_preset,
+            source=ModelSelectionSource.GLOBAL,
+            channel_default=channel_default,
+        )
 
     def set_session_model_preset(
         self,
@@ -2013,7 +2082,14 @@ class AgentLoop:
         session = ctx.require_session()
         runtime = ctx.runtime
         if runtime is None:
-            runtime = self.runtime_for_session(session)
+            runtime, decision = self.model_selection_for_turn(session, ctx.msg)
+            logger.debug(
+                "Turn {} model selection: preset={} source={} channel_default={}",
+                ctx.turn_id,
+                decision.preset,
+                decision.source.value,
+                decision.channel_default,
+            )
             ctx.runtime = runtime
         if ctx.session_key.startswith("dream:"):
             logger.info(

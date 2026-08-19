@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 
 import { channelUiPresentation } from "@/channel-plugins/registry";
 import { ToggleButton } from "@/components/settings/ToggleButton";
+import { ChannelModelPresetControl } from "@/components/settings/channels/ChannelModelPresetControl";
 import type { ChannelConfigField } from "@/components/settings/channels/catalog";
 import {
   CredentialForm,
@@ -29,10 +30,13 @@ import { useLogoFallback } from "@/hooks/useLogoFallback";
 import {
   configureChannel,
   disableNanobotFeature,
+  fetchSettings,
   enableNanobotFeature,
 } from "@/lib/api";
 import { logoFallbackUrls } from "@/lib/provider-brand";
+import { modelPresetOptionsFromSettings } from "@/lib/model-presets";
 import type {
+  ModelPresetOption,
   NanobotChannelInstanceInfo,
   NanobotFeatureInfo,
   NanobotFeaturesPayload,
@@ -55,6 +59,7 @@ export function ChannelInstancesPanel({
   showBrandLogos,
   chatAppsDocsUrl,
   instances: providedInstances,
+  modelOptions,
   onFeaturesUpdate,
   customization = {},
 }: {
@@ -62,16 +67,20 @@ export function ChannelInstancesPanel({
   showBrandLogos: boolean;
   chatAppsDocsUrl?: string;
   instances?: NanobotChannelInstanceInfo[];
+  modelOptions?: readonly ModelPresetOption[];
   onFeaturesUpdate: (payload: NanobotFeaturesPayload) => void;
   customization?: ChannelInstancesPanelCustomization;
 }) {
-  const { client } = useClient();
+  const { client, getToken } = useClient();
   const { t, i18n } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
   const displayName = localizedChannelDisplayName(feature, t);
   const instances = providedInstances ?? feature.instances ?? [];
+  const [fetchedModelOptions, setFetchedModelOptions] = useState<readonly ModelPresetOption[]>([]);
+  const resolvedModelOptions = modelOptions ?? fetchedModelOptions;
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [busyInstanceId, setBusyInstanceId] = useState<string | null>(null);
+  const [modelSavingInstanceId, setModelSavingInstanceId] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const selected = selectedId ? instances.find((instance) => instance.id === selectedId) : undefined;
   const setup = useMemo(
@@ -96,6 +105,21 @@ export function ChannelInstancesPanel({
   );
 
   useEffect(() => {
+    if (modelOptions !== undefined) return;
+    let cancelled = false;
+    fetchSettings(getToken())
+      .then((settings) => {
+        if (!cancelled) setFetchedModelOptions(modelPresetOptionsFromSettings(settings));
+      })
+      .catch(() => {
+        // The global-default option remains available if settings cannot be read here.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [getToken, modelOptions]);
+
+  useEffect(() => {
     if (selectedId && !instances.some((instance) => instance.id === selectedId)) {
       setSelectedId(null);
     }
@@ -118,6 +142,24 @@ export function ChannelInstancesPanel({
       setNotice((err as Error).message);
     } finally {
       setBusyInstanceId(null);
+    }
+  };
+
+  const saveInstanceDefaultModel = async (instance: NanobotChannelInstanceInfo, name: string) => {
+    setModelSavingInstanceId(instance.id);
+    setNotice(null);
+    try {
+      const payload = await configureChannel(
+        client,
+        feature.name,
+        { [`channels.${feature.name}.modelPreset`]: name },
+        { enable: instance.enabled, instanceId: instance.id },
+      );
+      if (payload.nanobot_features) onFeaturesUpdate(payload.nanobot_features);
+    } catch (err) {
+      setNotice((err as Error).message);
+    } finally {
+      setModelSavingInstanceId(null);
     }
   };
 
@@ -232,6 +274,15 @@ export function ChannelInstancesPanel({
               {expanded ? (
                 <div className="space-y-5 px-4 pb-4">
                   <section className="pt-4">
+                    <div className="mb-3 flex items-start justify-between gap-3">
+                      <ChannelModelPresetControl
+                        value={instance.model_preset}
+                        options={resolvedModelOptions}
+                        saving={modelSavingInstanceId === instance.id}
+                        onSave={(name) => void saveInstanceDefaultModel(instance, name)}
+                        className="w-full"
+                      />
+                    </div>
                     <div className="mb-3 flex items-start justify-between gap-3">
                       <p className="min-w-0 flex-1 truncate font-mono text-[11.5px] leading-6 text-muted-foreground">
                         {customization.renderInstanceSummary?.(instance) ?? instance.id}

@@ -192,6 +192,7 @@ interface ThreadComposerProps {
   modelPreset?: string | null;
   modelPresets?: ModelPresetOption[];
   onModelPresetChange?: (name: string) => void;
+  modelPresetIsOverride?: boolean;
   modelProvider?: string | null;
   modelProviderLabel?: string | null;
   modelNeedsSetup?: boolean;
@@ -957,6 +958,7 @@ export function ThreadComposer({
   modelPreset = null,
   modelPresets = [],
   onModelPresetChange,
+  modelPresetIsOverride = false,
   modelProvider = null,
   modelProviderLabel = null,
   modelNeedsSetup = false,
@@ -2549,6 +2551,7 @@ export function ThreadComposer({
                 modelPreset={modelPreset}
                 modelPresets={modelPresets}
                 onPresetChange={onModelPresetChange}
+                modelPresetIsOverride={modelPresetIsOverride}
                 provider={modelProvider}
                 providerLabel={modelProviderLabel}
                 needsSetup={modelNeedsSetup}

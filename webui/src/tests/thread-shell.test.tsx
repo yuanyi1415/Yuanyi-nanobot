@@ -637,8 +637,11 @@ describe("ThreadShell", () => {
       ),
     );
 
-    expect(await screen.findByTitle("Fast · gpt-5.5 · OpenAI Codex")).toBeInTheDocument();
-    expect(screen.queryByTitle("Default · deepseek-v4-pro · DeepSeek")).not.toBeInTheDocument();
+    // Check that "Fast" label is displayed (the active preset)
+    expect(await screen.findByText("Fast")).toBeInTheDocument();
+    // Check that "Default" is not displayed as the main label
+    const badge = screen.getByTestId("composer-model-badge");
+    expect(badge).not.toHaveTextContent("Default");
   });
 
   it("switches through every named preset while preserving call-order priority", async () => {
@@ -665,19 +668,23 @@ describe("ThreadShell", () => {
     ));
     const { rerender } = render(view("default"));
 
-    const badge = await screen.findByRole("spinbutton", { name: "Default" });
-    expect(badge).toHaveTextContent("Default");
-    fireEvent.keyDown(badge, { key: "ArrowDown" });
+    const badge = await screen.findByTestId("composer-model-badge");
+    expect(badge).toBeInTheDocument();
+    // Click badge to open menu, then click "Fast" option
+    fireEvent.click(badge.querySelector("button")!);
+    const menu = await screen.findByTestId("model-preset-menu");
+    fireEvent.click(await within(menu).findByText("Fast"));
 
     expect(client.sendSystemCommand).toHaveBeenCalledWith(
       "preset-order",
       "/model fast",
     );
     expect(await screen.findByText("Fast")).toBeInTheDocument();
-    fireEvent.keyDown(
-      screen.getByRole("spinbutton", { name: "Fast" }),
-      { key: "End" },
-    );
+    // Click badge again to open menu, then click "Extra" option
+    const badge2 = await screen.findByTestId("composer-model-badge");
+    fireEvent.click(badge2.querySelector("button")!);
+    const menu2 = await screen.findByTestId("model-preset-menu");
+    fireEvent.click(await within(menu2).findByText("Extra"));
     expect(client.sendSystemCommand).toHaveBeenLastCalledWith(
       "preset-order",
       "/model extra",
@@ -1094,10 +1101,11 @@ describe("ThreadShell", () => {
     ));
     const { rerender } = render(view(null));
 
-    fireEvent.keyDown(
-      await screen.findByRole("spinbutton", { name: "Default" }),
-      { key: "ArrowDown" },
-    );
+    // Click badge to open menu, then click "Fast" option
+    const badge = await screen.findByTestId("composer-model-badge");
+    fireEvent.click(badge.querySelector("button")!);
+    const menu = await screen.findByTestId("model-preset-menu");
+    fireEvent.click(await within(menu).findByText("Fast"));
     expect(await screen.findByText("Fast")).toBeInTheDocument();
     expect(client.sendSystemCommand).not.toHaveBeenCalled();
 

@@ -342,6 +342,7 @@ def test_channel_feature_instances_use_generic_setup_snapshot() -> None:
             "name": "Product bot",
             "display_name": "Catalog product helper",
             "avatar_url": "https://example.com/product.png",
+            "model_preset": None,
             "enabled": True,
             "configured": True,
             "config_values": {
