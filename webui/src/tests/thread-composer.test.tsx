@@ -575,6 +575,35 @@ describe("ThreadComposer", () => {
     expect(onPresetChange).toHaveBeenCalledWith("default");
   });
 
+  it("flips the model menu upward when it would overflow the viewport bottom", () => {
+    const { badge } = renderPresetComposer();
+    // Simulate the composer sitting near the bottom edge: the menu measured
+    // downward would extend past the viewport.
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+      x: 0,
+      y: 880,
+      top: 880,
+      right: 300,
+      bottom: 940,
+      left: 0,
+      width: 300,
+      height: 60,
+      toJSON: () => ({}),
+    } as DOMRect);
+    fireEvent.click(badge.querySelector("button")!);
+    const menu = screen.getByTestId("model-preset-menu");
+    expect(menu.className).toContain("bottom-full");
+    expect(menu.className).toContain("slide-in-from-bottom-1");
+  });
+
+  it("keeps the model menu downward when it fits within the viewport", () => {
+    const { badge } = renderPresetComposer();
+    fireEvent.click(badge.querySelector("button")!);
+    const menu = screen.getByTestId("model-preset-menu");
+    expect(menu.className).toContain("mt-1.5");
+    expect(menu.className).toContain("slide-in-from-top-1");
+  });
+
   it("supports keyboard selection without a pointer gesture", () => {
     const { selectPreset, onPresetChange } = renderPresetComposer("hero");
     selectPreset("dflash");

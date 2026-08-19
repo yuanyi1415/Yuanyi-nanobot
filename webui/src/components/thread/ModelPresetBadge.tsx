@@ -66,7 +66,9 @@ export function ModelPresetBadge({
   const hasSelection = Boolean(onPresetChange) && selectOptions.length > 1;
   const interactive = Boolean(onClick) && !hasSelection;
   const [menuOpen, setMenuOpen] = useState(false);
+  const [openUp, setOpenUp] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const menuPopRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
 
   // Close menu when clicking outside
@@ -79,6 +81,35 @@ export function ModelPresetBadge({
     };
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [menuOpen]);
+
+  // Choose the popover direction based on the available viewport space.
+  // The menu first renders downward; within the same frame (before paint)
+  // we measure it and flip upward when the bottom would overflow, e.g. in
+  // a thread with history where the composer sits at the window edge.
+  useLayoutEffect(() => {
+    if (!menuOpen) {
+      setOpenUp(false);
+      return;
+    }
+    const menuEl = menuPopRef.current;
+    if (!menuEl) return;
+    const computeDirection = () => {
+      const rect = menuEl.getBoundingClientRect();
+      const viewportBottom = window.innerHeight - 8;
+      setOpenUp((prev) => {
+        if (prev) {
+          // Open upward: fall back to downward when the top edge is clipped.
+          return rect.top >= 8;
+        }
+        // Open downward: flip upward when the bottom would overflow
+        // and there is enough room above.
+        return rect.bottom > viewportBottom && rect.top > 8;
+      });
+    };
+    computeDirection();
+    window.addEventListener("resize", computeDirection);
+    return () => window.removeEventListener("resize", computeDirection);
   }, [menuOpen]);
 
   const handleChange = (name: string) => {
@@ -156,11 +187,15 @@ export function ModelPresetBadge({
           />
           {/* Menu */}
           <div
+            ref={menuPopRef}
             className={cn(
-              "absolute z-50 mt-1.5 min-w-[220px] max-w-[280px]",
+              "absolute z-50 min-w-[220px] max-w-[280px]",
               "overflow-hidden rounded-xl border border-border/50",
               "bg-popover/95 backdrop-blur-md shadow-lg shadow-black/5",
-              "animate-in fade-in-0 zoom-in-95 slide-in-from-top-1 duration-150",
+              "animate-in fade-in-0 zoom-in-95 duration-150",
+              openUp
+                ? "bottom-full mb-1.5 slide-in-from-bottom-1"
+                : "mt-1.5 slide-in-from-top-1",
               "right-0",
             )}
             data-testid="model-preset-menu"
