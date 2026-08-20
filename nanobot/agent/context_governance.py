@@ -36,6 +36,16 @@ COMPACTABLE_TOOLS = frozenset({
 # read_file is the recovery path for persisted results; exempting it prevents persist->read->persist loops.
 TOOL_RESULT_OFFLOAD_EXEMPT_TOOLS = frozenset({"read_file"})
 BACKFILL_CONTENT = "[Tool result unavailable — call was interrupted or lost]"
+GOVERNANCE_NONE = "NONE"
+GOVERNANCE_TOOL_RESULT_NORMALIZED = "TOOL_RESULT_NORMALIZED"
+GOVERNANCE_HISTORY_SNIPPED = "HISTORY_SNIPPED"
+GOVERNANCE_INFLIGHT_COMPACTED = "INFLIGHT_COMPACTED"
+GOVERNANCE_MALFORMED_REPAIRED = "MALFORMED_REPAIRED"
+PREFIX_REWRITE_DIAGNOSTICS = frozenset({
+    GOVERNANCE_HISTORY_SNIPPED,
+    GOVERNANCE_INFLIGHT_COMPACTED,
+})
+
 PLACEHOLDER_TEXTS = frozenset({
     "[Previous assistant message omitted.]",
 })
@@ -68,10 +78,27 @@ class ContextGovernanceConfig:
     context_block_limit: int | None = None
     max_tokens: int | None = None
     inflight_start_index: int = 0
+    tool_definitions: list[dict[str, Any]] | None = None
 
 
 class ContextGovernor:
     """Prepare model-copy messages while preserving persisted history."""
+
+    def __init__(self) -> None:
+        self.last_diagnostics: tuple[str, ...] = ()
+
+    @staticmethod
+    def _tool_definitions(config: ContextGovernanceConfig) -> list[dict[str, Any]]:
+        return (
+            config.tool_definitions
+            if config.tool_definitions is not None
+            else config.tools.get_definitions()
+        )
+
+    @staticmethod
+    def rewrites_prefix(diagnostics: tuple[str, ...]) -> bool:
+        """Whether governance changed an existing model-visible prefix."""
+        return bool(PREFIX_REWRITE_DIAGNOSTICS.intersection(diagnostics))
 
     def prepare_for_model(
         self,
@@ -79,15 +106,39 @@ class ContextGovernor:
         messages: list[dict[str, Any]],
         compacted_tool_call_ids: set[str],
     ) -> list[dict[str, Any]]:
-        updated = self.strip_placeholder_assistant_messages(messages)
-        updated = self.strip_malformed_tool_calls(updated)
-        updated = self.drop_orphan_tool_results(updated)
-        updated = self.backfill_missing_tool_results(updated)
-        updated = self.apply_tool_result_budget(config, updated)
-        updated = self.compact_inflight_overflow(config, updated, compacted_tool_call_ids)
-        updated = self.snip_history(config, updated)
-        updated = self.drop_orphan_tool_results(updated)
-        return self.backfill_missing_tool_results(updated)
+        diagnostics: list[str] = []
+        updated = messages
+        for label, operation in (
+            (GOVERNANCE_MALFORMED_REPAIRED, self.strip_placeholder_assistant_messages),
+            (GOVERNANCE_MALFORMED_REPAIRED, self.strip_malformed_tool_calls),
+            (GOVERNANCE_MALFORMED_REPAIRED, self.drop_orphan_tool_results),
+            (GOVERNANCE_MALFORMED_REPAIRED, self.backfill_missing_tool_results),
+        ):
+            repaired = operation(updated)
+            if repaired != updated:
+                diagnostics.append(label)
+            updated = repaired
+        normalized = self.apply_tool_result_budget(config, updated)
+        if normalized != updated:
+            diagnostics.append(GOVERNANCE_TOOL_RESULT_NORMALIZED)
+        updated = normalized
+        compacted = self.compact_inflight_overflow(config, updated, compacted_tool_call_ids)
+        if compacted != updated:
+            diagnostics.append(GOVERNANCE_INFLIGHT_COMPACTED)
+        updated = compacted
+        snipped = self.snip_history(config, updated)
+        if snipped != updated:
+            diagnostics.append(GOVERNANCE_HISTORY_SNIPPED)
+        updated = snipped
+        repaired = self.drop_orphan_tool_results(updated)
+        if repaired != updated:
+            diagnostics.append(GOVERNANCE_MALFORMED_REPAIRED)
+        updated = repaired
+        repaired = self.backfill_missing_tool_results(updated)
+        if repaired != updated:
+            diagnostics.append(GOVERNANCE_MALFORMED_REPAIRED)
+        self.last_diagnostics = tuple(dict.fromkeys(diagnostics)) or (GOVERNANCE_NONE,)
+        return repaired
 
     @staticmethod
     def input_budget(config: ContextGovernanceConfig) -> int:
@@ -337,7 +388,7 @@ class ContextGovernor:
         if budget <= 0:
             return messages
 
-        tools = config.tools.get_definitions()
+        tools = self._tool_definitions(config)
         updated = self._apply_recorded_compactions(messages, compacted_tool_call_ids)
         estimate, source = estimate_prompt_tokens_chain(
             config.provider,
@@ -399,7 +450,7 @@ class ContextGovernor:
         if budget <= 0:
             return messages
 
-        tools = config.tools.get_definitions()
+        tools = self._tool_definitions(config)
         estimate, _ = estimate_prompt_tokens_chain(
             config.provider,
             config.model,

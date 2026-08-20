@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from nanobot.agent.tools.base import Tool, ToolResult
 from nanobot.agent.tools.context import ContextAware, current_request_context
+from nanobot.context.frame import ToolSurface
 
 if TYPE_CHECKING:
     from nanobot.runtime_context import RuntimeContextProvider
@@ -106,6 +107,17 @@ class ToolRegistry:
             self._cached_definitions = builtins + mcp_tools
 
         return self._cached_definitions
+
+    def project_definitions(self, names: list[str] | None = None) -> ToolSurface:
+        """Return the stable model-facing tool surface for an optional name subset."""
+        definitions = self.get_definitions()
+        selected = set(names) if names is not None else None
+        projected = [
+            definition
+            for definition in definitions
+            if selected is None or self._schema_name(definition) in selected
+        ]
+        return ToolSurface.from_definitions(projected)
 
     def prepare_call(
         self,

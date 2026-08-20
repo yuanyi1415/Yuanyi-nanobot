@@ -4,6 +4,7 @@ import pytest
 
 from nanobot.agent.runner import AgentRunner, AgentRunSpec
 from nanobot.config.schema import AgentDefaults
+from nanobot.context.frame import ToolSurface
 from nanobot.providers.base import (
     GenerationSettings,
     LLMProvider,
@@ -69,3 +70,35 @@ async def test_active_run_keeps_provider_captured_at_admission() -> None:
     assert second_calls == 0
     assert request_temperatures == [0.2, 0.2]
     assert selected_runtime.provider is second_provider
+
+
+@pytest.mark.asyncio
+async def test_runner_sends_projected_tool_surface_instead_of_full_registry() -> None:
+    provider = MagicMock(spec=LLMProvider)
+    provider.generation = GenerationSettings()
+    captured: list[list[dict]] = []
+
+    async def chat(**kwargs):
+        captured.append(kwargs["tools"])
+        return LLMResponse(content="done")
+
+    provider.chat_with_retry = chat
+    tools = MagicMock()
+    full_definitions = [
+        {"type": "function", "function": {"name": "read_file"}},
+        {"type": "function", "function": {"name": "write_file"}},
+    ]
+    tools.get_definitions.return_value = full_definitions
+    surface = ToolSurface.from_definitions(full_definitions[:1])
+    runtime = LLMRuntime.capture(provider, "model", context_window_tokens=16_384)
+
+    await AgentRunner().run(AgentRunSpec(
+        initial_messages=[{"role": "user", "content": "read"}],
+        tools=tools,
+        tool_surface=surface,
+        runtime=runtime,
+        max_iterations=1,
+        max_tool_result_chars=AgentDefaults().max_tool_result_chars,
+    ))
+
+    assert captured == [[full_definitions[0]]]

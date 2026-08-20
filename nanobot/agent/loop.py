@@ -55,6 +55,8 @@ from nanobot.bus.queue import MessageBus
 from nanobot.bus.runtime_events import RuntimeEventBus
 from nanobot.command import CommandContext, CommandRouter, register_builtin_commands
 from nanobot.config.schema import AgentDefaults, ModelPresetConfig
+from nanobot.context.cache_plan import CachePlan
+from nanobot.context.frame import ContextFrame, ToolSurface
 from nanobot.cron.session_turns import cron_trigger
 from nanobot.providers.base import LLMProvider, ProviderConversationState
 from nanobot.providers.factory import ProviderSnapshot
@@ -158,6 +160,10 @@ class TurnContext:
     runtime: LLMRuntime | None
     kind: TurnKind
     delivery: TurnDelivery
+    model_selection: ModelSelectionDecision | None = None
+    context_frame: ContextFrame | None = None
+    tool_surface: ToolSurface | None = None
+    cache_plan: CachePlan | None = None
     original_user_text: str | None = None
     session: Session | None = None
 
@@ -875,7 +881,7 @@ class AgentLoop:
                 self._observe_lane(ctx, decision)
             if self.skill_auto_bind:
                 auto_bind = list(decision.bound)
-        messages = self.context.build_messages(
+        frame = self.context.build_frame(
             history=ctx.history,
             current_message=ctx.msg.content,
             media=ctx.msg.media if ctx.kind is TurnKind.USER and ctx.msg.media else None,
@@ -889,6 +895,11 @@ class AgentLoop:
             unified_session=self._unified_session,
             auto_bind_skill_names=auto_bind,
         )
+        ctx.context_frame = frame
+        ctx.tool_surface = ToolSurface.from_definitions(
+            (ctx.tools or self.tools).get_definitions()
+        )
+        messages = self.context.serialize_frame(frame)
         loaded_skill_names = tuple((*decision.explicit, *auto_bind)) if decision is not None else ()
         if self.observe_lane and decision is not None and loaded_skill_names:
             self._observe_skill_context_loaded(ctx, loaded_skill_names, auto_bound=auto_bind)
@@ -1177,6 +1188,8 @@ class AgentLoop:
         tools: ToolRegistry | None = None,
         request_context: RequestContext | None = None,
         provider_state: ProviderConversationState | None = None,
+        tool_surface: ToolSurface | None = None,
+        cache_plan: CachePlan | None = None,
     ) -> tuple[str | None, list[str], list[dict[str, Any]], str, bool]:
         """Run the agent iteration loop.
 
@@ -1402,6 +1415,8 @@ class AgentLoop:
                     message_metadata=metadata,
                 ),
                 provider_state=provider_state,
+                tool_surface=tool_surface,
+                cache_plan=cache_plan,
             ))
         finally:
             turn_scope_stack.close()
@@ -2091,6 +2106,7 @@ class AgentLoop:
                 decision.channel_default,
             )
             ctx.runtime = runtime
+            ctx.model_selection = decision
         if ctx.session_key.startswith("dream:"):
             logger.info(
                 "Dream run using model={} (preset={})",
@@ -2243,6 +2259,8 @@ class AgentLoop:
             tools=ctx.tools,
             request_context=ctx.request_context,
             provider_state=ctx.provider_state,
+            tool_surface=ctx.tool_surface,
+            cache_plan=ctx.cache_plan,
         )
         final_content, _, all_msgs, stop_reason, had_injections = result
         ctx.final_content = final_content

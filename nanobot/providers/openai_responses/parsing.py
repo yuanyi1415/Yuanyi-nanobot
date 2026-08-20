@@ -186,6 +186,23 @@ def _response_finish_reason(
     return map_finish_reason(terminal_status)
 
 
+def _usage_value(usage: dict[str, Any], paths: tuple[tuple[str, ...], ...]) -> int | None:
+    for path in paths:
+        current: Any = usage
+        for segment in path:
+            current = (
+                cast(dict[str, Any], current).get(segment)
+                if isinstance(current, dict)
+                else None
+            )
+        if current is not None:
+            try:
+                return int(current)
+            except (TypeError, ValueError):
+                return None
+    return None
+
+
 def _usage_from_response_obj(response: object) -> dict[str, int]:
     response_object = _response_object(response)
     usage_raw: object = (
@@ -203,11 +220,28 @@ def _usage_from_response_obj(response: object) -> dict[str, int]:
         usage.get("output_tokens") or usage.get("completion_tokens") or 0
     )
     total_tokens = int(usage.get("total_tokens") or prompt_tokens + completion_tokens)
-    return {
+    result = {
         "prompt_tokens": prompt_tokens,
         "completion_tokens": completion_tokens,
         "total_tokens": total_tokens,
     }
+    cache_read = _usage_value(usage, (
+        ("input_tokens_details", "cached_tokens"),
+        ("prompt_tokens_details", "cached_tokens"),
+        ("cached_tokens",),
+    ))
+    cache_write = _usage_value(usage, (
+        ("input_tokens_details", "cache_write_tokens"),
+        ("input_tokens_details", "cache_creation_input_tokens"),
+        ("cache_write_tokens",),
+        ("cache_creation_input_tokens",),
+        ("prompt_cache_write_tokens",),
+    ))
+    if cache_read is not None:
+        result["cache_read_tokens"] = cache_read
+    if cache_write is not None:
+        result["cache_write_tokens"] = cache_write
+    return result
 
 
 def _parse_tool_call_arguments(args_raw: Any, name: str | None) -> Any:
@@ -782,13 +816,7 @@ async def consume_sdk_stream(
                 if on_content_delta and remaining_text:
                     await on_content_delta(remaining_text)
             if resp:
-                usage_obj = getattr(resp, "usage", None)
-                if usage_obj:
-                    usage = {
-                        "prompt_tokens": int(getattr(usage_obj, "input_tokens", 0) or 0),
-                        "completion_tokens": int(getattr(usage_obj, "output_tokens", 0) or 0),
-                        "total_tokens": int(getattr(usage_obj, "total_tokens", 0) or 0),
-                    }
+                usage = _usage_from_response_obj(resp) or usage
                 if not reasoning_content:
                     reasoning_content = _extract_reasoning_summary_from_output(
                         getattr(resp, "output", None)

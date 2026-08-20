@@ -12,10 +12,12 @@ Every entry writes out all fields so you can copy-paste as a template.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from pydantic.alias_generators import to_snake
+
+from nanobot.providers.cache.capabilities import CacheCapabilities
 
 
 @dataclass(frozen=True)
@@ -81,6 +83,7 @@ class ProviderSpec:
 
     # Provider supports cache_control on content blocks (e.g. Anthropic prompt caching)
     supports_prompt_caching: bool = False
+    cache_capabilities: CacheCapabilities = field(default_factory=CacheCapabilities)
 
     # How to inject the thinking on/off toggle into extra_body.
     # ""              — no extra_body needed (default)
@@ -389,6 +392,11 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         display_name="OpenAI",
         backend="openai_compat",
         supports_max_completion_tokens=True,
+        cache_capabilities=CacheCapabilities(
+            implicit_prefix=True,
+            stable_cache_key=True,
+            cache_read_metrics=True,
+        ),
     ),
     # OpenAI Codex: OAuth-based, dedicated provider
     ProviderSpec(
@@ -484,6 +492,11 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         thinking_style="thinking_type",
         responses_models=("deepseek-v4-flash",),
         responses_default_tools=("web_search",),
+        cache_capabilities=CacheCapabilities(
+            implicit_prefix=True,
+            cache_read_metrics=True,
+            cache_miss_metrics=True,
+        ),
     ),
     # Gemini: Google's OpenAI-compatible endpoint
     ProviderSpec(
@@ -503,6 +516,10 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         backend="openai_compat",
         env_extras=(("ZHIPUAI_API_KEY", "{api_key}"),),
         default_api_base="https://open.bigmodel.cn/api/paas/v4",
+        cache_capabilities=CacheCapabilities(
+            implicit_prefix=True,
+            cache_read_metrics=True,
+        ),
     ),
     # DashScope (通义): Qwen models, OpenAI-compatible endpoint
     ProviderSpec(
@@ -513,6 +530,10 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         backend="openai_compat",
         default_api_base="https://dashscope.aliyuncs.com/compatible-mode/v1",
         thinking_style="enable_thinking",
+        cache_capabilities=CacheCapabilities(
+            implicit_prefix=True,
+            cache_read_metrics=True,
+        ),
     ),
     # ModelScope (魔搭社区): OpenAI-compatible API
     ProviderSpec(

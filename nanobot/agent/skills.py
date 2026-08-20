@@ -149,14 +149,18 @@ class SkillsLoader:
         self._skill_file_cache: dict[Path, _SkillFileCacheEntry] = {}
 
     def _find_skill_path(self, name: str) -> Path | None:
-        """Resolve *name* with the same workspace-over-builtin precedence as loading."""
+        """Resolve flat or one-category-deep skills with workspace precedence."""
         roots = [self.workspace_skills]
         if self.builtin_skills:
             roots.append(self.builtin_skills)
         for root in roots:
-            path = root / name / "SKILL.md"
-            if path.exists():
-                return path
+            direct = root / name / "SKILL.md"
+            if direct.exists():
+                return direct
+            for category in sorted(root.iterdir()) if root.exists() else ():
+                nested = category / name / "SKILL.md"
+                if category.is_dir() and nested.exists():
+                    return nested
         return None
 
     def _read_skill_entry(self, path: Path) -> _SkillFileCacheEntry | None:
@@ -200,20 +204,57 @@ class SkillsLoader:
             return None
         return {str(key): value for key, value in cast(dict[object, object], parsed).items()}
 
-    def _skill_entries_from_dir(self, base: Path, source: str, *, skip_names: set[str] | None = None) -> list[dict[str, str]]:
+    def _skill_entries_from_dir(
+        self,
+        base: Path,
+        source: str,
+        *,
+        skip_names: set[str] | None = None,
+    ) -> list[dict[str, str]]:
         if not base.exists():
             return []
         entries: list[dict[str, str]] = []
-        for skill_dir in base.iterdir():
+        for skill_dir in sorted(base.iterdir()):
+            if not skill_dir.is_dir():
+                continue
+            nested_dirs = [
+                child
+                for child in sorted(skill_dir.iterdir())
+                if child.is_dir() and (child / "SKILL.md").exists()
+            ]
+            skill_file = skill_dir / "SKILL.md"
+            if skill_file.exists() and not nested_dirs:
+                name = skill_dir.name
+                if skip_names is None or name not in skip_names:
+                    entries.append({"name": name, "path": str(skill_file), "source": source})
+                continue
+            for nested_dir in nested_dirs:
+                name = nested_dir.name
+                if skip_names is None or name not in skip_names:
+                    entries.append({
+                        "name": name,
+                        "path": str(nested_dir / "SKILL.md"),
+                        "source": source,
+                    })
+        return entries
+
+    def _skill_navigation_entries(self, base: Path, source: str) -> list[dict[str, str]]:
+        """Return model-facing category navigation without expanding child skills."""
+        if not base.exists():
+            return []
+        entries: list[dict[str, str]] = []
+        for skill_dir in sorted(base.iterdir()):
             if not skill_dir.is_dir():
                 continue
             skill_file = skill_dir / "SKILL.md"
-            if not skill_file.exists():
+            nested = any(
+                child.is_dir() and (child / "SKILL.md").exists()
+                for child in skill_dir.iterdir()
+            )
+            if skill_file.exists():
+                entries.append({"name": skill_dir.name, "path": str(skill_file), "source": source})
+            elif nested:
                 continue
-            name = skill_dir.name
-            if skip_names is not None and name in skip_names:
-                continue
-            entries.append({"name": name, "path": str(skill_file), "source": source})
         return entries
 
     def list_skills(self, filter_unavailable: bool = True) -> list[dict[str, str]]:
@@ -286,7 +327,15 @@ class SkillsLoader:
                 invoked.append(name)
         return invoked
 
+    def build_skill_navigation(self, exclude: set[str] | None = None) -> str:
+        """Build the model-facing navigation view without expanding child skills."""
+        return self._build_skill_navigation_summary(exclude)
+
     def build_skills_summary(self, exclude: set[str] | None = None) -> str:
+        """Backward-compatible alias for the model-facing navigation view."""
+        return self._build_skill_navigation_summary(exclude)
+
+    def _build_skill_navigation_summary(self, exclude: set[str] | None = None) -> str:
         """
         Build a summary of all skills (name, description, path, availability).
 
@@ -308,11 +357,24 @@ class SkillsLoader:
             ("Workspace skills", "workspace", self.workspace_skills),
             ("Built-in skills", "builtin", self.builtin_skills),
         )
+        visible_by_source = {
+            source: [entry for entry in all_skills if entry["source"] == source]
+            for _, source, _ in groups
+        }
         for label, source, root in groups:
+            visible = visible_by_source[source]
+            visible_names = {entry["name"] for entry in visible}
             entries = [
                 entry
-                for entry in all_skills
-                if entry["source"] == source and (not exclude or entry["name"] not in exclude)
+                for entry in self._skill_navigation_entries(root, source)
+                if (
+                    entry["name"] in visible_names
+                    or any(
+                        Path(skill["path"]).parent.parent == Path(entry["path"]).parent
+                        for skill in visible
+                    )
+                )
+                and (not exclude or entry["name"] not in exclude)
             ]
             if not entries:
                 continue

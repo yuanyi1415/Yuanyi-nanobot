@@ -14,6 +14,7 @@ import httpx
 from loguru import logger
 from oauth_cli_kit import get_token as get_codex_token
 
+from nanobot.context.cache_plan import CachePlan
 from nanobot.providers.base import (
     LLMProvider,
     LLMResponse,
@@ -69,6 +70,7 @@ class OpenAICodexProvider(LLMProvider):
         on_thinking_delta: Callable[[str], Awaitable[None]] | None = None,
         on_tool_call_delta: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
         provider_context: ProviderCallContext | None = None,
+        prompt_cache_key: str | None = None,
     ) -> LLMResponse:
         """Shared request logic for both chat() and chat_stream()."""
         model = model or self.default_model
@@ -96,7 +98,7 @@ class OpenAICodexProvider(LLMProvider):
             "instructions": system_prompt,
             "input": input_items,
             "text": {"verbosity": "medium"},
-            "prompt_cache_key": _prompt_cache_key(messages[:2]),
+            "prompt_cache_key": prompt_cache_key or _prompt_cache_key(messages[:2]),
             "tool_choice": tool_choice or "auto",
             "parallel_tool_calls": True,
         }
@@ -226,6 +228,7 @@ class OpenAICodexProvider(LLMProvider):
         reasoning_effort: str | None = None,
         tool_choice: str | dict[str, Any] | None = None,
         provider_context: ProviderCallContext | None = None,
+        prompt_cache_key: str | None = None,
     ) -> LLMResponse:
         return await self._call_codex(
             messages,
@@ -235,6 +238,7 @@ class OpenAICodexProvider(LLMProvider):
             reasoning_effort,
             tool_choice,
             provider_context=provider_context,
+            prompt_cache_key=prompt_cache_key,
         )
 
     async def chat_with_context(
@@ -257,6 +261,7 @@ class OpenAICodexProvider(LLMProvider):
         on_thinking_delta: Callable[[str], Awaitable[None]] | None = None,
         on_tool_call_delta: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
         provider_context: ProviderCallContext | None = None,
+        prompt_cache_key: str | None = None,
     ) -> LLMResponse:
         return await self._call_codex(
             messages=messages,
@@ -269,6 +274,7 @@ class OpenAICodexProvider(LLMProvider):
             on_thinking_delta=on_thinking_delta,
             on_tool_call_delta=on_tool_call_delta,
             provider_context=provider_context,
+            prompt_cache_key=prompt_cache_key,
         )
 
     async def chat_stream_with_context(
@@ -281,6 +287,11 @@ class OpenAICodexProvider(LLMProvider):
             **kwargs,
             provider_context=provider_context,
         )
+
+    def cache_request_kwargs(self, plan: CachePlan) -> dict[str, str]:
+        """Map the generic plan to Codex's stable prompt cache scope."""
+        scope = f"{plan.session_scope_key}:{plan.domain.key}:{plan.context_epoch}"
+        return {"prompt_cache_key": hashlib.sha256(scope.encode("utf-8")).hexdigest()}
 
     def get_default_model(self) -> str:
         return self.default_model

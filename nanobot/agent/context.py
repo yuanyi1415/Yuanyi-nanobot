@@ -4,7 +4,7 @@ import base64
 import mimetypes
 import platform
 from pathlib import Path
-from typing import Any, Mapping, Sequence, cast
+from typing import TYPE_CHECKING, Any, Mapping, Sequence, cast
 
 from nanobot.agent.memory import MemoryStore
 from nanobot.agent.skills import SkillsLoader
@@ -31,6 +31,9 @@ from nanobot.utils.helpers import (
     truncate_text_to_tokens,
 )
 from nanobot.utils.prompt_templates import render_template
+
+if TYPE_CHECKING:
+    from nanobot.context.frame import ContextFrame
 
 
 def session_extra(metadata: Mapping[str, Any] | None) -> dict[str, Any]:
@@ -117,7 +120,7 @@ class ContextBuilder:
             if active_content:
                 parts.append(f"# Active Skills\n\n{active_content}")
 
-        skills_summary = self.skills.build_skills_summary(exclude=set(active_skills))
+        skills_summary = self.skills.build_skill_navigation(exclude=set(active_skills))
         if skills_summary:
             parts.append(render_template("agent/skills_section.md", skills_summary=skills_summary))
 
@@ -140,22 +143,39 @@ class ContextBuilder:
 
         return "\n\n---\n\n".join(parts)
 
-    def _get_identity(self, channel: str | None = None, workspace: Path | None = None) -> str:
-        """Get the core identity section."""
+    def _identity_values(self, workspace: Path | None = None) -> dict[str, Any]:
         root = workspace or self.workspace
-        workspace_path = str(root.expanduser().resolve())
-        agent_workspace_path = str(self.workspace.expanduser().resolve())
         system = platform.system()
-        runtime = f"{'macOS' if system == 'Darwin' else system} {platform.machine()}, Python {platform.python_version()}"
+        return {
+            "workspace_path": str(root.expanduser().resolve()),
+            "agent_workspace_path": str(self.workspace.expanduser().resolve()),
+            "runtime": f"{'macOS' if system == 'Darwin' else system} {platform.machine()}, Python {platform.python_version()}",
+            "platform_policy": render_template("agent/platform_policy.md", system=system),
+        }
 
+    def build_core_identity(self, workspace: Path | None = None) -> str:
+        """Build stable identity and platform policy without session environment."""
+        return render_template("agent/core_identity.md", **self._identity_values(workspace))
+
+    def build_session_environment(
+        self,
+        *,
+        channel: str | None = None,
+        workspace: Path | None = None,
+    ) -> str:
+        """Build workspace and channel-specific environment content."""
         return render_template(
-            "agent/identity.md",
-            workspace_path=workspace_path,
-            agent_workspace_path=agent_workspace_path,
-            runtime=runtime,
-            platform_policy=render_template("agent/platform_policy.md", system=system),
+            "agent/session_environment.md",
+            **self._identity_values(workspace),
             channel=channel or "",
         )
+
+    def _get_identity(self, channel: str | None = None, workspace: Path | None = None) -> str:
+        """Get the core identity plus session environment sections."""
+        return "\n\n".join((
+            self.build_core_identity(workspace),
+            self.build_session_environment(channel=channel, workspace=workspace),
+        ))
 
     @staticmethod
     def _merge_message_content(left: Any, right: Any) -> str | list[dict[str, Any]]:
@@ -217,7 +237,7 @@ class ContextBuilder:
             return content.strip() == tpl.strip()
         return False
 
-    def build_messages(
+    def build_frame(
         self,
         history: list[dict[str, Any]],
         current_message: str,
@@ -233,13 +253,10 @@ class ContextBuilder:
         session_key: str | None = None,
         unified_session: bool = False,
         auto_bind_skill_names: Sequence[str] | None = None,
-    ) -> list[dict[str, Any]]:
-        """Build the complete message list for an LLM call.
+    ) -> "ContextFrame":
+        """Build a provider-neutral frame while preserving legacy prompt assembly."""
+        from nanobot.context.frame import ContextBlock, ContextFrame, ContextStability
 
-        ``auto_bind_skill_names`` (skill-guidance lane) is merged after the
-        explicit ``$skill`` references: explicit names keep priority, auto
-        bindings are appended to the tail without duplicates.
-        """
         root = workspace or self.workspace
         active_skill_names = (
             self.skills.get_explicitly_invoked_skills(current_message)
@@ -249,33 +266,55 @@ class ContextBuilder:
         for name in auto_bind_skill_names or ():
             if name not in active_skill_names:
                 active_skill_names.append(name)
+        system_prompt = self.build_system_prompt(
+            active_skill_names=active_skill_names,
+            channel=channel,
+            session_summary=session_summary,
+            workspace=root,
+            include_memory=include_memory,
+            include_memory_recent_history=include_memory_recent_history,
+            session_key=session_key,
+            unified_session=unified_session,
+        )
+        blocks: list[ContextBlock] = []
+        for index, content in enumerate(system_prompt.split("\\n\\n---\\n\\n")):
+            stability = ContextStability.CORE
+            if index > 0:
+                stability = ContextStability.HISTORY if (
+                    "# Recent History" in content or "[Archived Context Summary]" in content
+                ) else ContextStability.SESSION
+                if "# Active Skills" in content or "# Skills" in content:
+                    stability = ContextStability.TASK
+            blocks.append(ContextBlock(f"system:{index}", stability, "system", content))
+        return ContextFrame(
+            blocks=tuple(blocks),
+            history=tuple(dict(message) for message in history),
+            current_message=self.build_current_message(
+                current_message,
+                media=media,
+                current_role=current_role,
+                runtime_context_blocks=runtime_context_blocks,
+            ),
+        )
+
+    @staticmethod
+    def serialize_frame(frame: "ContextFrame") -> list[dict[str, Any]]:
+        """Serialize a frame using the legacy message shape and role merge rules."""
         messages: list[dict[str, Any]] = [
             {
                 "role": "system",
-                "content": self.build_system_prompt(
-                    active_skill_names=active_skill_names,
-                    channel=channel,
-                    session_summary=session_summary,
-                    workspace=root,
-                    include_memory=include_memory,
-                    include_memory_recent_history=include_memory_recent_history,
-                    session_key=session_key,
-                    unified_session=unified_session,
+                "content": "\\n\\n---\\n\\n".join(
+                    str(block.content) for block in frame.blocks
                 ),
             },
-            *history,
+            *[dict(message) for message in frame.history],
         ]
-        current = self.build_current_message(
-            current_message,
-            media=media,
-            current_role=current_role,
-            runtime_context_blocks=runtime_context_blocks,
-        )
+        current = dict(frame.current_message)
+        current_role = cast(str, current["role"])
         if messages[-1].get("role") == current_role:
             last = dict(messages[-1])
-            last["content"] = self._merge_message_content(
-                last.get("content"),
-                current.get("content"),
+            last["content"] = ContextBuilder._merge_message_content(
+                last.get("content"), current.get("content")
             )
             current_meta = current.get("_meta")
             if current_role == "user" and isinstance(current_meta, dict):
@@ -286,6 +325,15 @@ class ContextBuilder:
             return messages
         messages.append(current)
         return messages
+
+    def build_messages(
+        self,
+        history: list[dict[str, Any]],
+        current_message: str,
+        **kwargs: Any,
+    ) -> list[dict[str, Any]]:
+        """Build the legacy message list through the new frame path."""
+        return self.serialize_frame(self.build_frame(history, current_message, **kwargs))
 
     def build_current_message(
         self,

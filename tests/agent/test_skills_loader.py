@@ -39,6 +39,35 @@ def test_list_skills_empty_when_skills_dir_missing(tmp_path: Path) -> None:
     assert loader.list_skills(filter_unavailable=False) == []
 
 
+def test_nested_category_skills_are_runtime_entries_and_category_is_navigation_only(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "ws"
+    category = workspace / "skills" / "documents"
+    _write_skill(category, "summarize", body="# Summarize\n")
+    (category / "SKILL.md").write_text(
+        "---\ndescription: Document navigation\n---\n\n# Documents\n",
+        encoding="utf-8",
+    )
+    loader = SkillsLoader(workspace, builtin_skills_dir=tmp_path / "builtin")
+
+    entries = loader.list_skills(filter_unavailable=False)
+    navigation = loader.build_skill_navigation()
+
+    assert [entry["name"] for entry in entries] == ["summarize"]
+    assert "documents" in navigation
+    assert "summarize" not in navigation
+
+
+def test_nested_skill_can_be_loaded_by_logical_name(tmp_path: Path) -> None:
+    workspace = tmp_path / "ws"
+    _write_skill(workspace / "skills" / "documents", "summarize", body="# Full body\n")
+    loader = SkillsLoader(workspace, builtin_skills_dir=tmp_path / "builtin")
+
+    assert loader.load_skill("summarize") is not None
+    assert "Full body" in loader.load_skill("summarize")
+
+
 def test_list_skills_empty_when_skills_dir_exists_but_empty(tmp_path: Path) -> None:
     workspace = tmp_path / "ws"
     (workspace / "skills").mkdir(parents=True)

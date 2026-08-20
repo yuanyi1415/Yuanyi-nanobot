@@ -130,6 +130,22 @@ class FallbackProvider(LLMProvider):
         self._has_fallbacks = bool(fallback_presets)
         self._primary_failures = 0
         self._primary_tripped_at: float | None = None
+        self._last_successful_provider: str | None = None
+        self._last_successful_model: str | None = None
+
+    @property
+    def successful_provider(self) -> str | None:
+        """Provider family that actually produced the last successful response."""
+        return self._last_successful_provider
+
+    @property
+    def successful_model(self) -> str | None:
+        """Model that actually produced the last successful response."""
+        return self._last_successful_model
+
+    def _record_success(self, provider: LLMProvider, model: str | None) -> None:
+        self._last_successful_provider = type(provider).__name__.removesuffix("Provider").lower()
+        self._last_successful_model = model
 
     @property
     def generation(self) -> GenerationSettings:
@@ -286,6 +302,7 @@ class FallbackProvider(LLMProvider):
             if response.finish_reason != "error":
                 self._primary_failures = 0
                 self._primary_tripped_at = None
+                self._record_success(self._primary, primary_model)
                 return response
             primary_error = (response.content or primary_error)[:120]
 
@@ -376,6 +393,14 @@ class FallbackProvider(LLMProvider):
                 "max_tokens": fallback.max_tokens,
                 "temperature": fallback.temperature,
             }
+            # Provider-specific cache fields belong to the concrete attempt;
+            # never leak OpenAI-only fields into another fallback provider.
+            for cache_key in (
+                "prompt_cache_key",
+                "prompt_cache_breakpoint",
+                "prompt_cache_retention",
+            ):
+                fallback_kwargs.pop(cache_key, None)
             provider_context = fallback_kwargs.get("provider_context")
             if isinstance(provider_context, ProviderCallContext):
                 state = provider_context.conversation_state
@@ -404,6 +429,7 @@ class FallbackProvider(LLMProvider):
                     "Fallback '{}' succeeded after primary '{}' failed",
                     fallback_model, primary_model,
                 )
+                self._record_success(fallback_provider, fallback_model)
                 return fallback_response
 
             last_response = fallback_response

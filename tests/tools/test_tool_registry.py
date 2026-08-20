@@ -292,6 +292,27 @@ async def test_registry_uses_structured_tool_result_for_errors() -> None:
     assert "[Analyze the error above" in error_result
 
 
+def test_project_definitions_preserves_registry_order_and_subset() -> None:
+    registry = ToolRegistry()
+    registry.register(_FakeTool("mcp_git_status"))
+    registry.register(_FakeTool("write_file"))
+    registry.register(_FakeTool("read_file"))
+
+    surface = registry.project_definitions(["read_file", "mcp_git_status"])
+
+    assert surface.names == ("read_file", "mcp_git_status")
+    assert len(surface.definitions) == 2
+
+
+def test_project_definitions_without_names_returns_full_compatible_surface() -> None:
+    registry = _registry_with_names(["write_file", "read_file"])
+
+    surface = registry.project_definitions()
+
+    assert surface.names == ("read_file", "write_file")
+    assert surface.fingerprint
+
+
 def test_get_definitions_returns_cached_result() -> None:
     registry = ToolRegistry()
     registry.register(_FakeTool("read_file"))

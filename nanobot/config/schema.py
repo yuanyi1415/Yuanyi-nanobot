@@ -127,6 +127,8 @@ class ExperimentalConfig(Base):
     orchestration_observe: bool = False  # V0：影子模式——只记录 planner 决策，不创建 Frame/Worker（行为零变化）
     orchestration_max_parallel_workers: int = Field(default=2, ge=1, le=8)
     orchestration_result_context_chars: int = Field(default=12_000, ge=1_000, le=48_000)
+    context_frame_enabled: bool = False  # Cache project: use ContextFrame construction path
+    provider_cache_plan_enabled: bool = False  # Cache project: enable provider cache planning
 
 
 class AgentDefaults(Base):

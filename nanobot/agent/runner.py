@@ -19,6 +19,8 @@ from nanobot.agent.context_governance import (
 )
 from nanobot.agent.hook import AgentHook, AgentHookContext, AgentRunHookContext
 from nanobot.agent.tools.registry import ToolRegistry, is_tool_error_result
+from nanobot.context.cache_plan import CachePlan
+from nanobot.context.frame import ToolSurface
 from nanobot.providers.base import (
     LLMProvider,
     LLMResponse,
@@ -115,6 +117,8 @@ class AgentRunSpec:
     goal_continue_message: GoalContinueMessage | None = None
     finalize_on_max_iterations: bool = True
     provider_state: ProviderConversationState | None = None
+    tool_surface: ToolSurface | None = None
+    cache_plan: CachePlan | None = field(default=None, repr=False)
 
 
 @dataclass(slots=True)
@@ -456,6 +460,11 @@ class AgentRunner:
             context_block_limit=spec.context_block_limit,
             max_tokens=spec.runtime.generation.max_tokens,
             inflight_start_index=len(spec.initial_messages),
+            tool_definitions=(
+                list(spec.tool_surface.definitions)
+                if spec.tool_surface is not None
+                else None
+            ),
         )
 
         for iteration in range(spec.max_iterations):
@@ -890,6 +899,12 @@ class AgentRunner:
         kwargs["temperature"] = generation.temperature
         kwargs["max_tokens"] = generation.max_tokens
         kwargs["reasoning_effort"] = generation.reasoning_effort
+        if spec.cache_plan is not None:
+            mapper = getattr(spec.runtime.provider, "cache_request_kwargs", None)
+            if callable(mapper):
+                mapped = mapper(spec.cache_plan)
+                if isinstance(mapped, dict):
+                    kwargs.update(cast(dict[str, Any], mapped))
         return kwargs
 
     async def _request_model(
@@ -916,10 +931,15 @@ class AgentRunner:
         if timeout_s <= 0:
             timeout_s = None
 
+        projected_tools = (
+            list(spec.tool_surface.definitions)
+            if spec.tool_surface is not None
+            else spec.tools.get_definitions()
+        )
         kwargs = self._build_request_kwargs(
             spec,
             messages,
-            tools=spec.tools.get_definitions(),
+            tools=projected_tools,
         )
         wants_streaming = hook.wants_streaming()
         progress_callback = spec.progress_callback

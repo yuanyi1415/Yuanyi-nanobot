@@ -297,6 +297,60 @@ class TestNoFallbackWhenPrimarySucceeds:
         factory.assert_not_called()
 
 
+class TestFallbackCacheFieldIsolation:
+    @pytest.mark.asyncio
+    async def test_openai_cache_fields_do_not_leak_to_fallback_attempt(self) -> None:
+        primary = _FakeProvider("primary", _error_response())
+        fallback = _FakeProvider("fallback", _make_response("fallback ok"))
+        fb = FallbackProvider(
+            primary=primary,
+            fallback_presets=[_fallback("qwen-max", provider="qwen")],
+            provider_factory=MagicMock(return_value=fallback),
+        )
+
+        result = await fb.chat(
+            messages=[{"role": "user", "content": "hi"}],
+            model="gpt-5.6",
+            prompt_cache_key="openai-only",
+        )
+
+        assert result.content == "fallback ok"
+        assert "prompt_cache_key" in primary.chat_calls[0]
+        assert "prompt_cache_key" not in fallback.chat_calls[0]
+
+
+class TestFallbackRecordsActualSuccess:
+    @pytest.mark.asyncio
+    async def test_records_fallback_provider_and_model_on_success(self) -> None:
+        primary = _FakeProvider("primary", _error_response())
+        fallback = _FakeProvider("fallback", _make_response("fallback ok"))
+        fb = FallbackProvider(
+            primary=primary,
+            fallback_presets=[_fallback("qwen-max", provider="qwen")],
+            provider_factory=MagicMock(return_value=fallback),
+        )
+
+        result = await fb.chat(messages=[{"role": "user", "content": "hi"}], model="gpt-5.6")
+
+        assert result.content == "fallback ok"
+        assert fb.successful_provider == "_fake"
+        assert fb.successful_model == "qwen-max"
+
+    @pytest.mark.asyncio
+    async def test_records_primary_on_direct_success(self) -> None:
+        primary = _FakeProvider("primary", _make_response("primary ok"))
+        fb = FallbackProvider(
+            primary=primary,
+            fallback_presets=[_fallback("qwen-max", provider="qwen")],
+            provider_factory=MagicMock(),
+        )
+
+        await fb.chat(messages=[{"role": "user", "content": "hi"}], model="gpt-5.6")
+
+        assert fb.successful_provider == "_fake"
+        assert fb.successful_model == "gpt-5.6"
+
+
 class TestFallbackOnPrimaryError:
     @pytest.mark.asyncio
     async def test_first_fallback_succeeds(self) -> None:
